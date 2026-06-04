@@ -1,0 +1,21 @@
+@{
+    Name = "Convert-VideoToAV1"
+    RootPath = $PSScriptRoot
+    
+    Scripts = @{
+        "Build" = @"
+Write-Host "Building project..." -ForegroundColor Cyan
+git add .
+git status
+"@
+        "Test" = @"
+Write-Host "Testing project..." -ForegroundColor Cyan
+Import-Module .\Modules\*.psm1 -Force
+Write-Host "All modules loaded successfully" -ForegroundColor Green
+"@
+        "Run" = @"
+Write-Host "Running conversion..." -ForegroundColor Cyan
+.\Convert-VideoToAV1.ps1 @args
+"@
+    }
+}

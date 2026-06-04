@@ -1,0 +1,42 @@
+# Compiled files
+*.exe
+*.dll
+*.pdb
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.lwi
+*.cache
+*.pyc
+__pycache__/
+
+# Output and temp directories
+.enc/
+temp_*/
+*.tmp/
+*.temp/
+*.working/
+
+# Video files (optional - uncomment if needed)
+# *.mkv
+# *.mp4
+# *.ivf
+# *.hevc
+
+# IDE files
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Large files
+*.ivf
+*.hevc
+*.flac
