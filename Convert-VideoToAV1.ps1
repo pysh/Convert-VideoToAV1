@@ -68,7 +68,7 @@ begin {
     
     # Импорт модулей
     $modulesPath = Join-Path $PSScriptRoot 'Modules'
-    $modules = @(
+    $requiredModules = @(
         'Utilities.psm1',
         'ColorProcessor.psm1',
         'DemuxProcessor.psm1',
@@ -78,22 +78,29 @@ begin {
         'MuxProcessor.psm1'
     )
     
-    foreach ($module in $modules) {
+    foreach ($module in $requiredModules) {
         $modulePath = Join-Path $modulesPath $module
         if (-not (Test-Path $modulePath)) {
-            throw "Модуль не найден: $modulePath"
+            throw "Module not found: $modulePath"
         }
         Import-Module $modulePath -Force -ErrorAction Stop
-        Write-Verbose "Импортирован модуль: $module"
+        Write-Verbose "Imported module: $module"
     }
     
     # Инициализация конфигурации
     $configPath = Join-Path $PSScriptRoot 'config.psd1'
-    Initialize-Configuration -ConfigPath $configPath
+    if (-not (Test-Path $configPath)) {
+        throw "Configuration file not found: $configPath"
+    }
+    
+    $global:Config = Import-PowerShellDataFile -Path $configPath
+    $global:VideoTools = $global:Config.Tools
+    
+    Write-Log "Configuration loaded: $configPath" -Severity Success -Category 'Config'
     
     # Показ списка энкодеров
     if ($ListEncoders) {
-        Write-Host "`nДоступные энкодеры:" -ForegroundColor Cyan
+        Write-Host "`nAvailable encoders:" -ForegroundColor Cyan
         Write-Host ('=' * 50) -ForegroundColor Cyan
         
         $availableEncoders = Get-AvailableEncoders -Format 'Display'
@@ -112,13 +119,17 @@ begin {
     # Валидация энкодера
     $encoderCheck = Test-EncoderPreset -EncoderName $Encoder
     if (-not $encoderCheck.IsAvailable) {
-        throw "Энкодер '$Encoder' не найден. Используйте -ListEncoders для просмотра доступных"
+        throw "Encoder '$Encoder' not found. Use -ListEncoders to see available options."
     }
     
     # Установка путей
     if (-not $InputDirectory) {
         $InputDirectory = $global:Config.Paths.DefaultInputDirectory
+        if (-not $InputDirectory) {
+            throw "Input directory not specified and no default in config"
+        }
     }
+    
     if (-not $OutputDirectory) {
         $OutputDirectory = Join-Path $InputDirectory '.enc'
     }
@@ -127,14 +138,15 @@ begin {
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
     
     # Проверка инструментов
+    Write-Log "Checking required tools..." -Severity Information -Category 'Main'
     foreach ($tool in $global:VideoTools.PSObject.Properties) {
         if (-not (Get-Command $tool.Value -ErrorAction SilentlyContinue)) {
-            throw "Инструмент не найден: $($tool.Name) -> $($tool.Value)"
+            throw "Tool not found: $($tool.Name) -> $($tool.Value)"
         }
         Write-Verbose "$($tool.Name): $($tool.Value)"
     }
     
-    Write-Log "Конфигурация загружена. Энкодер: $Encoder" -Severity Information -Category 'Main'
+    Write-Log "Configuration loaded. Encoder: $Encoder" -Severity Information -Category 'Main'
 }
 
 process {
@@ -148,18 +160,18 @@ process {
         }
         
         if (-not $videoFiles) {
-            Write-Log "Видеофайлы не найдены в: $InputDirectory" -Severity Warning -Category 'Main'
+            Write-Log "No video files found in: $InputDirectory" -Severity Warning -Category 'Main'
             return
         }
         
-        Write-Log "Найдено файлов: $($videoFiles.Count)" -Severity Information -Category 'Main'
+        Write-Log "Found files: $($videoFiles.Count)" -Severity Information -Category 'Main'
         
         foreach ($videoFile in $videoFiles) {
             $job = $null
             
             try {
                 Write-Log "`n" -Severity Information -Category 'Main'
-                Write-Log "Обработка: $($videoFile.Name)" -Severity Information -Category 'Main'
+                Write-Log "Processing: $($videoFile.Name)" -Severity Information -Category 'Main'
                 Write-Log ('=' * 60) -Severity Information -Category 'Main'
                 
                 $baseName = [IO.Path]::GetFileNameWithoutExtension($videoFile.Name)
@@ -180,6 +192,7 @@ process {
                     StartTime = Get-Date
                     EncoderName = $Encoder
                     TrimStartSeconds = $TrimStartSeconds
+                    TrimDurationSeconds = 0
                     CropParameters = $CropParameters
                 }
                 
@@ -201,30 +214,61 @@ process {
                 }
                 
                 # 1. ДЕМУКС - извлечение всех потоков
-                Write-Log "`n[1/4] ДЕМУКС" -Severity Information -Category 'Main'
+                Write-Log "`n[1/5] DEMUX" -Severity Information -Category 'Main'
                 $job = Invoke-Demux -Job $job
                 
+                # Получение FrameRate для обрезки
+                $job.FrameRate = Get-VideoFrameRate -VideoPath $job.VideoSource
+                
                 # 2. ОБРАБОТКА NFO
-                Write-Log "`n[2/4] МЕТАДАННЫЕ" -Severity Information -Category 'Main'
+                Write-Log "`n[2/5] METADATA" -Severity Information -Category 'Main'
                 $job = Invoke-NfoProcessing -Job $job
                 
                 # 3. ОБРАБОТКА АУДИО
-                Write-Log "`n[3/4] АУДИО" -Severity Information -Category 'Main'
+                Write-Log "`n[3/5] AUDIO" -Severity Information -Category 'Main'
                 $job = ConvertTo-Audio -Job $job
                 
                 # 4. ОБРАБОТКА ВИДЕО
-                Write-Log "`n[4/4] ВИДЕО" -Severity Information -Category 'Main'
+                Write-Log "`n[4/5] VIDEO" -Severity Information -Category 'Main'
                 $job = ConvertTo-Video -Job $job -TemplatePath $CustomTemplatePath
                 
                 # 5. СБОРКА ФИНАЛЬНОГО ФАЙЛА
-                Write-Log "`n[МУКС] Сборка итогового файла" -Severity Information -Category 'Main'
+                Write-Log "`n[5/5] MUX" -Severity Information -Category 'Main'
                 
-                $outputFileName = Get-OutputFileName -Job $job
+                # Формирование имени выходного файла
+                $encoderCode = Get-EncoderCode -EncoderName $job.EncoderName
+                
+                if ($job.NfoFields -and $job.NfoFields.SHOWTITLE) {
+                    $showTitle = $job.NfoFields.SHOWTITLE -replace '[\\/*?:"<>|]', '_'
+                    $season = [int]($job.NfoFields.SEASON_NUMBER ?? 1)
+                    $episode = [int]($job.NfoFields.PART_NUMBER ?? 1)
+                    $title = ($job.NfoFields.TITLE -replace '[\\/*?:"<>|]', '_') ?? 'Episode'
+                    $airDate = $job.NfoFields.AIR_DATE ?? $job.NfoFields.DATE_RELEASED ?? 'Unknown'
+                    
+                    # Получение разрешения видео
+                    $videoInfo = Get-VideoStats -VideoFilePath $job.VideoSource
+                    $width = $videoInfo.ResolutionWidth
+                    $height = $videoInfo.ResolutionHeight
+                    
+                    $resolution = switch ($width) {
+                        { $_ -gt 3840 } { '8k' }
+                        { $_ -gt 2560 } { '4k' }
+                        { $_ -gt 1920 } { '2k' }
+                        { $_ -gt 1280 } { '1080p' }
+                        default { "${height}p" }
+                    }
+                    
+                    $outputFileName = "{0} - s{1:00}e{2:00} - {3} [{4}][{5}][{6}].mkv" -f 
+                        $showTitle, $season, $episode, $title, $airDate, $resolution, $encoderCode
+                } else {
+                    $outputFileName = "$($job.BaseName)_[$encoderCode].mkv"
+                }
+                
                 $job.FinalOutput = Join-Path $OutputDirectory $outputFileName
                 
                 # Проверка существования выходного файла
                 if (-not $Force -and (Test-Path $job.FinalOutput)) {
-                    throw "Выходной файл уже существует: $outputFileName (используйте -Force для перезаписи)"
+                    throw "Output file already exists: $outputFileName (use -Force to overwrite)"
                 }
                 
                 $job = Invoke-Mux -Job $job
@@ -234,14 +278,14 @@ process {
                 $outputSize = (Get-Item $job.FinalOutput).Length / 1MB
                 
                 Write-Log "`n" -Severity Information -Category 'Main'
-                Write-Log "ГОТОВО!" -Severity Success -Category 'Main'
-                Write-Log "  Файл: $([IO.Path]::GetFileName($job.FinalOutput))" -Severity Success -Category 'Main'
-                Write-Log "  Размер: {0:N2} MB" -f $outputSize -Severity Success -Category 'Main'
-                Write-Log "  Время: $($duration.ToString('hh\:mm\:ss'))" -Severity Success -Category 'Main'
+                Write-Log "COMPLETED!" -Severity Success -Category 'Main'
+                Write-Log "  File: $([IO.Path]::GetFileName($job.FinalOutput))" -Severity Success -Category 'Main'
+                Write-Log "  Size: {0:N2} MB" -f $outputSize -Severity Success -Category 'Main'
+                Write-Log "  Time: $($duration.ToString('hh\:mm\:ss'))" -Severity Success -Category 'Main'
                 Write-Log ('=' * 60) -Severity Information -Category 'Main'
             }
             catch {
-                Write-Log "ОШИБКА при обработке $($videoFile.Name): $($_.Exception.Message)" -Severity Error -Category 'Main'
+                Write-Log "ERROR processing $($videoFile.Name): $($_.Exception.Message)" -Severity Error -Category 'Main'
                 Write-Log $_.ScriptStackTrace -Severity Debug -Category 'Main'
                 throw
             }
@@ -260,41 +304,11 @@ process {
         }
     }
     catch {
-        Write-Log "Критическая ошибка: $($_.Exception.Message)" -Severity Error -Category 'Main'
+        Write-Log "Critical error: $($_.Exception.Message)" -Severity Error -Category 'Main'
         throw
     }
 }
 
 end {
-    Write-Log "Обработка завершена" -Severity Information -Category 'Main'
-}
-
-function Get-OutputFileName {
-    param([hashtable]$Job)
-    
-    $encoderCode = Get-EncoderCode -EncoderName $Job.EncoderName
-    
-    if ($Job.NfoFields -and $Job.NfoFields.SHOWTITLE) {
-        $showTitle = $Job.NfoFields.SHOWTITLE -replace '[\\/*?:"<>|]', '_'
-        $season = [int]($Job.NfoFields.SEASON_NUMBER ?? 1)
-        $episode = [int]($Job.NfoFields.PART_NUMBER ?? 1)
-        $title = ($Job.NfoFields.TITLE -replace '[\\/*?:"<>|]', '_') ?? 'Episode'
-        $airDate = $Job.NfoFields.AIR_DATE ?? $Job.NfoFields.DATE_RELEASED ?? 'Unknown'
-        
-        # Получение разрешения видео
-        $videoInfo = Get-VideoStats -VideoFilePath $Job.VideoSource
-        $width = $videoInfo.ResolutionWidth
-        $resolution = switch ($width) {
-            { $_ -gt 3840 } { '8k' }
-            { $_ -gt 2560 } { '4k' }
-            { $_ -gt 1920 } { '2k' }
-            { $_ -gt 1280 } { '1080p' }
-            default { "${height}p" }
-        }
-        
-        return "{0} - s{1:00}e{2:00} - {3} [{4}][{5}][{6}].mkv" -f 
-            $showTitle, $season, $episode, $title, $airDate, $resolution, $encoderCode
-    }
-    
-    return "$($Job.BaseName)_[$encoderCode].mkv"
+    Write-Log "Processing completed" -Severity Information -Category 'Main'
 }
