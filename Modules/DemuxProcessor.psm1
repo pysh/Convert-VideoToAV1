@@ -48,9 +48,12 @@ function Get-MediaFileInfo {
     [CmdletBinding()]
     param([string]$FilePath)
     
+    $originalEncoding = [Console]::OutputEncoding
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $output = & $global:VideoTools.FFprobe -v quiet -print_format json `
         -show_streams -show_format -show_chapters $FilePath 2>&1
-    
+    [Console]::OutputEncoding = $originalEncoding
+
     if ($LASTEXITCODE -ne 0) {
         throw "FFprobe failed: $output"
     }
@@ -77,7 +80,12 @@ function Extract-VideoStream {
         default { 'h264' }
     }
     
-    $outputFile = Join-Path $OutputDir "video.$extension"
+    $outputFile = Join-Path $OutputDir "video.mkv" # "video.$extension"
+    if (Test-Path -LiteralPath $outputFile) {
+        Write-Log "Video stream already exists: $outputFile" -Severity Verbose -Category 'Demux'
+        $Job.TempFiles.Add($outputFile)
+        return $outputFile
+    }
     
     $trimParams = @()
     if ($Job.TrimStartSeconds -gt 0) {
@@ -87,7 +95,7 @@ function Extract-VideoStream {
         $trimParams += '-t', $Job.TrimDurationSeconds.ToString('0.######', [CultureInfo]::InvariantCulture)
     }
     
-    $args = @(
+    $ffmpegArgs = @(
         '-y', '-hide_banner', '-loglevel', 'error'
         $trimParams
         '-i', $Job.OriginalPath
@@ -96,10 +104,11 @@ function Extract-VideoStream {
         '-map_metadata', '-1'
         $outputFile
     )
+
+    Write-Log "Extracting video stream with FFmpeg arguments: $($ffmpegArgs -join ' ')" -Severity Verbose -Category 'Demux'
+    & $global:VideoTools.FFmpeg $ffmpegArgs 2>&1 | Out-Null
     
-    & $global:VideoTools.FFmpeg $args 2>&1 | Out-Null
-    
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $outputFile)) {
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputFile)) {
         throw "Failed to extract video stream (exit code: $LASTEXITCODE)"
     }
     
@@ -142,7 +151,7 @@ function Extract-AudioStreams {
             $trimParams += '-t', $Job.TrimDurationSeconds.ToString('0.######', [CultureInfo]::InvariantCulture)
         }
         
-        $args = @(
+        $ffmpegArgs = @(
             '-y', '-hide_banner', '-loglevel', 'error'
             $trimParams
             '-i', $Job.OriginalPath
@@ -151,10 +160,11 @@ function Extract-AudioStreams {
             '-map_metadata', '-1'
             $outputFile
         )
+
+        Write-Log "Extracting audio stream with FFmpeg arguments: $($ffmpegArgs -join ' ')" -Severity Verbose -Category 'Demux'
+        & $global:VideoTools.FFmpeg $ffmpegArgs
         
-        & $global:VideoTools.FFmpeg $args 2>&1 | Out-Null
-        
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $outputFile)) {
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputFile)) {
             throw "Failed to extract audio stream $index (exit code: $LASTEXITCODE)"
         }
         
@@ -166,7 +176,7 @@ function Extract-AudioStreams {
             Codec = $stream.codec_name
             Channels = $stream.channels
             Default = $stream.disposition.default -eq 1
-            Forced = $stream.disposition.forced -eq 1
+            Forced = (($stream.disposition.forced -eq 1) -or ($title -eq 'forced'))
         }
         
         $Job.TempFiles.Add($outputFile)
@@ -187,14 +197,14 @@ function Extract-SubtitleStreams {
         $index++
         
         $language = $stream.tags.language ?? $stream.tags.LANGUAGE ?? 'und'
-        $title = $stream.tags.title ?? $stream.tags.TITLE ?? ''
+        $title = $stream.tags.title ?? $stream.tags.handler_name ?? ''
         
         $fileName = "sub_{0:D2}[{1}]{2}.srt" -f $index, $language,
             $(if ($title) { "_{$(Get-SafeFileName $title)}" } else { '' })
         $outputFile = Join-Path $OutputDir $fileName
         
         # Конвертируем все форматы в SRT
-        $args = @(
+        $ffmpegArgs = @(
             '-y', '-hide_banner', '-loglevel', 'error'
             '-i', $Job.OriginalPath
             '-map', "0:s:$($index-1)"
@@ -202,9 +212,10 @@ function Extract-SubtitleStreams {
             $outputFile
         )
         
-        & $global:VideoTools.FFmpeg $args 2>&1 | Out-Null
+        Write-Log "Extracting video stream with FFmpeg arguments: $($ffmpegArgs -join ' ')" -Severity Verbose -Category 'Demux'
+        & $global:VideoTools.FFmpeg $ffmpegArgs 2>&1 | Out-Null
         
-        if (Test-Path $outputFile) {
+        if (Test-Path -LiteralPath $outputFile) {
             $result += @{
                 Path = $outputFile
                 Index = $index
@@ -212,7 +223,8 @@ function Extract-SubtitleStreams {
                 Name = $title
                 Codec = 'srt'
                 Default = $stream.disposition.default -eq 1
-                Forced = $stream.disposition.forced -eq 1
+                Forced = (($stream.disposition.forced -eq 1) -or ($title -eq 'forced'))
+                SDH = (($stream.disposition.hearing_impaired -eq 1) -or ($title -eq 'SDH'))
             }
             $Job.TempFiles.Add($outputFile)
         }
@@ -245,17 +257,33 @@ function Extract-GlobalTags {
     [CmdletBinding()]
     param([hashtable]$Job, [object]$FileInfo, [string]$OutputDir)
     
+    # Проверяем наличие тегов
     if (-not $FileInfo.Format.tags -or $FileInfo.Format.tags.Count -eq 0) {
+        Write-Log "No global tags found in file" -Severity Verbose -Category 'Demux'
         return $null
     }
     
     $outputFile = Join-Path $OutputDir 'tags.xml'
     
-    Convert-MP4TagsToXml -Tags $FileInfo.Format.tags -OutputFile $outputFile
-    
-    if (Test-Path $outputFile) {
-        $Job.TempFiles.Add($outputFile)
-        return $outputFile
+    try {
+        Convert-MP4TagsToXml -Tags $FileInfo.Format.tags -OutputFile $outputFile
+        
+        if (Test-Path $outputFile) {
+            # Проверяем, что файл не пустой
+            $content = Get-Content $outputFile -Raw
+            if ($content -match '<Simple>') {
+                $Job.TempFiles.Add($outputFile)
+                Write-Log "Global tags extracted: $outputFile" -Severity Verbose -Category 'Demux'
+                return $outputFile
+            } else {
+                Write-Log "No meaningful tags found" -Severity Verbose -Category 'Demux'
+                Remove-Item $outputFile -Force -ErrorAction SilentlyContinue
+                return $null
+            }
+        }
+    }
+    catch {
+        Write-Log "Failed to extract global tags: $_" -Severity Warning -Category 'Demux'
     }
     
     return $null
@@ -267,20 +295,17 @@ function Extract-CoverAndAttachments {
     
     $result = @{ Cover = $null; Files = @() }
     
-    # Проверка внешней обложки
+    # Проверка внешней обложки в директории исходного файла
     $sourceDir = [IO.Path]::GetDirectoryName($Job.OriginalPath)
-    $coverNames = @('cover.jpg', 'cover.png', 'folder.jpg', 'poster.jpg')
+    $coverFile = Find-ExternalCover -SourceDir $sourceDir
     
-    foreach ($name in $coverNames) {
-        $coverPath = Join-Path $sourceDir $name
-        if (Test-Path $coverPath) {
-            $destPath = Join-Path $OutputDir "cover$([IO.Path]::GetExtension($coverPath))"
-            Copy-Item $coverPath $destPath -Force
-            $result.Cover = $destPath
-            $Job.TempFiles.Add($destPath)
-            Write-Log "Найдена внешняя обложка: $name" -Severity Information -Category 'Demux'
-            break
-        }
+    if ($coverFile) {
+        $coverExt = [IO.Path]::GetExtension($coverFile)
+        $destPath = Join-Path $OutputDir "cover$coverExt"
+        Copy-Item -LiteralPath $coverFile -Destination $destPath -Force
+        $result.Cover = $destPath
+        $Job.TempFiles.Add($destPath)
+        Write-Log "Найдена внешняя обложка: $([IO.Path]::GetFileName($coverFile))" -Severity Information -Category 'Demux'
     }
     
     # Извлечение вложений из MKV
@@ -292,7 +317,7 @@ function Extract-CoverAndAttachments {
         $fileName = $attachment.tags.filename ?? "attach_$($attachment.index).dat"
         $outputFile = Join-Path $OutputDir $fileName
         
-        $args = @(
+        $ffmpegArgs = @(
             '-y', '-hide_banner', '-loglevel', 'error'
             '-i', $Job.OriginalPath
             '-map', "0:$($attachment.index)"
@@ -300,25 +325,112 @@ function Extract-CoverAndAttachments {
             $outputFile
         )
         
-        & $global:VideoTools.FFmpeg $args 2>&1 | Out-Null
+        Write-Log "Extracting attachments with FFmpeg arguments: $($ffmpegArgs -join ' ')" -Severity Verbose -Category 'Demux'
+        & $global:VideoTools.FFmpeg $ffmpegArgs 2>&1 | Out-Null
         
         if (Test-Path $outputFile) {
             $isCover = $fileName -match 'cover|poster|folder'
             
             if ($isCover -and -not $result.Cover) {
                 $result.Cover = $outputFile
+                Write-Log "Встроенная обложка извлечена: $fileName" -Severity Information -Category 'Demux'
             } else {
                 $result.Files += @{
                     Path = $outputFile
                     Name = $fileName
                     MimeType = $attachment.tags.mimetype ?? 'application/octet-stream'
                 }
+                Write-Log "Вложение извлечено: $fileName" -Severity Verbose -Category 'Demux'
             }
             $Job.TempFiles.Add($outputFile)
         }
     }
     
     return $result
+}
+
+function Find-ExternalCover {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourceDir,
+        [switch]$SearchParentDirectories = $true
+    )
+    
+    # Статические имена файлов обложек
+    $coverStaticNames = @(
+        'cover.jpg', 'cover.png', 'cover.webp',
+        'folder.jpg', 'folder.png', 'folder.webp',
+        'poster.jpg', 'poster.png'
+    )
+    
+    # Регулярные выражения для поиска обложек
+    $coverRegexPatterns = @(
+        'season\d+\-poster\.(jpg|jpeg|png|webp)',
+        'poster\.(jpg|jpeg|png|webp)',
+        'cover-\d+\.(jpg|jpeg|png|webp)',
+        '.*-poster\.(jpg|jpeg|png|webp)',
+        '.*-cover\.(jpg|jpeg|png|webp)'
+    )
+    
+    # Функция поиска в конкретной директории
+    function Search-InDirectory {
+        param([string]$Directory)
+        
+        # Проверка статических имен
+        foreach ($coverName in $coverStaticNames) {
+            $potentialCover = Join-Path -Path $Directory -ChildPath $coverName
+            if (Test-Path -LiteralPath $potentialCover -PathType Leaf) {
+                return $potentialCover
+            }
+        }
+        
+        # Поиск по регулярным выражениям
+        try {
+            $allFiles = Get-ChildItem -Path $Directory -File -ErrorAction SilentlyContinue
+            
+            foreach ($pattern in $coverRegexPatterns) {
+                $matchingFiles = $allFiles | Where-Object { $_.Name -match $pattern }
+                
+                if ($matchingFiles.Count -gt 0) {
+                    $coverFile = $matchingFiles | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                    return $coverFile.FullName
+                }
+            }
+        }
+        catch {
+            Write-Log "Ошибка поиска в директории $Directory : $_" -Severity Warning -Category 'Demux'
+        }
+        
+        return $null
+    }
+    
+    # Поиск в текущей директории
+    $coverFile = Search-InDirectory -Directory $SourceDir
+    if ($coverFile) {
+        Write-Log "Найдена обложка в текущей директории: $([IO.Path]::GetFileName($coverFile))" -Severity Information -Category 'Demux'
+        return $coverFile
+    }
+    
+    # Поиск в родительских директориях (для структуры сериалов)
+    if ($SearchParentDirectories) {
+        $currentDir = $SourceDir
+        $levelsUp = 0
+        $maxLevels = 3
+        
+        while ($levelsUp -lt $maxLevels -and $currentDir -ne [IO.Path]::GetPathRoot($currentDir)) {
+            $currentDir = [IO.Path]::GetDirectoryName($currentDir)
+            $levelsUp++
+            
+            $coverFile = Search-InDirectory -Directory $currentDir
+            if ($coverFile) {
+                Write-Log "Найдена обложка на $levelsUp уровень(ей) выше: $([IO.Path]::GetFileName($coverFile))" -Severity Information -Category 'Demux'
+                return $coverFile
+            }
+        }
+    }
+    
+    Write-Log "Внешняя обложка не найдена" -Severity Verbose -Category 'Demux'
+    return $null
 }
 
 Export-ModuleMember -Function Invoke-Demux

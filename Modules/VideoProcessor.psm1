@@ -41,16 +41,36 @@ function ConvertTo-Video {
     Set-Content -LiteralPath $Job.ScriptFile -Value $scriptContent -Force -Encoding UTF8
     $Job.TempFiles.Add($Job.ScriptFile)
     
+    # ============================================
+    # ПОЛУЧАЕМ ИНФОРМАЦИЮ О СКРИПТЕ ДО КОДИРОВАНИЯ
+    # ============================================
+    try {
+        $vpyInfo = Get-VideoScriptInfo -ScriptPath $Job.ScriptFile
+        $Job.VPYInfo = $vpyInfo
+        Write-Log "Информация о VapourSynth скрипте: $($vpyInfo.Frames) кадров, FPS: $($vpyInfo.FPS)" -Severity Information -Category 'Video'
+    }
+    catch {
+        Write-Log "Не удалось получить информацию о VapourSynth скрипте: $_" -Severity Warning -Category 'Video'
+        $Job.VPYInfo = $null
+    }
+    
     # Запуск кодирования
     Invoke-Encoder -Job $Job
     
-    # Проверка количества кадров
-    $encodedInfo = Get-VideoStats -VideoFilePath $Job.VideoEncoded
-    $scriptInfo = Get-VideoScriptInfo -ScriptPath $Job.ScriptFile
-    
-    if ($encodedInfo.FrameCount -ne $scriptInfo.Frames) {
-        Write-Log "Предупреждение: несоответствие кадров (скрипт: $($scriptInfo.Frames), видео: $($encodedInfo.FrameCount))" `
-            -Severity Warning -Category 'Video'
+    # Проверка количества кадров (если есть информация для сравнения)
+    if ($Job.VPYInfo -and $Job.VPYInfo.Frames -gt 0) {
+        try {
+            $encodedInfo = Get-VideoStats -VideoFilePath $Job.VideoEncoded
+            if ($encodedInfo.FrameCount -ne $Job.VPYInfo.Frames) {
+                Write-Log "Предупреждение: несоответствие кадров (скрипт: $($Job.VPYInfo.Frames), видео: $($encodedInfo.FrameCount))" `
+                    -Severity Warning -Category 'Video'
+            } else {
+                Write-Log "Проверка кадров: OK ($($Job.VPYInfo.Frames) кадров)" -Severity Success -Category 'Video'
+            }
+        }
+        catch {
+            Write-Log "Не удалось проверить количество кадров в закодированном видео: $_" -Severity Warning -Category 'Video'
+        }
     }
     
     $Job.TempFiles.Add($Job.VideoEncoded)
@@ -63,14 +83,14 @@ function Select-Template {
     [CmdletBinding()]
     param([hashtable]$Job, [string]$CustomPath)
     
-    if ($CustomPath -and (Test-Path $CustomPath)) {
+    if ($CustomPath -and (Test-Path -LiteralPath $CustomPath)) {
         Write-Log "Использование пользовательского шаблона: $CustomPath" -Severity Information -Category 'Video'
         return $CustomPath
     }
     
     $videoDir = [IO.Path]::GetDirectoryName($Job.VideoSource)
     $localTemplate = Join-Path $videoDir 'template.vpy'
-    if (Test-Path $localTemplate) {
+    if (Test-Path -LiteralPath $localTemplate) {
         Write-Log "Использование локального шаблона: $localTemplate" -Severity Information -Category 'Video'
         return $localTemplate
     }
@@ -86,7 +106,7 @@ function Select-Template {
     $scriptDir = Split-Path -Parent $PSScriptRoot
     $templatePath = Join-Path $scriptDir $relativePath
     
-    if (-not (Test-Path $templatePath)) {
+    if (-not (Test-Path -LiteralPath $templatePath)) {
         throw "Template not found: $templatePath"
     }
     
@@ -148,32 +168,57 @@ function Invoke-Encoder {
         $supportsVpy = Test-X265VpySupport -X265Path $Job.EncoderPath
         
         if ($supportsVpy) {
-            $x265args = @('--input', $Job.ScriptFile, '--output', $Job.VideoEncoded) + $Job.EncoderParams
-            & $Job.EncoderPath $x265args
+            $encArgs = @('--input', $Job.ScriptFile, '--output', $Job.VideoEncoded) + $Job.EncoderParams
+            Write-Log "Запуск x265 с прямым чтением VPY" -Severity Verbose -Category 'Video'
+            
+            $cmd="$($Job.EncoderPath) $($encArgs -join ' ')"
+            Write-Log $cmd -Severity Verbose -Category 'Video'
+            $Job.CommandLines+=@{'EncodeVideo'=$cmd}
+
+            & $Job.EncoderPath $encArgs
         } else {
+            Write-Log "Запуск x265 через vspipe" -Severity Verbose -Category 'Video'
             $vspipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
             $encArgs = @('--output', $Job.VideoEncoded, '--input', '-') + $Job.EncoderParams
+
+            $cmd="$($global:VideoTools.VSPipe) $($vspipeArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
+            Write-Log $cmd -Severity Verbose -Category 'Video'
+            $Job.CommandLines+=@{'EncodeVideo'=$cmd}
+
             & $global:VideoTools.VSPipe $vspipeArgs | & $Job.EncoderPath $encArgs
         }
     } else {
         $vspipeMethod = $global:Config.Processing.VSPipeMethod ?? 'vspipe'
         
+        # Формируем аргументы энкодера
+        $encArgs = @('--output', $Job.VideoEncoded, '--input', '-') + $Job.EncoderParams
+        
+        # Добавляем параметр --frames, если известен
+        if ($Job.VPYInfo -and $Job.VPYInfo.Frames -gt 0) {
+            $encArgs = @('--frames', $Job.VPYInfo.Frames) + $encArgs
+            Write-Log "Установлено ограничение кадров: $($Job.VPYInfo.Frames)" -Severity Verbose -Category 'Video'
+        }
+        
         if ($vspipeMethod -eq 'ffmpeg') {
+            Write-Log "Запуск через FFmpeg пайп" -Severity Verbose -Category 'Video'
             $ffmpegArgs = @(
                 '-y', '-hide_banner', '-loglevel', 'error', '-nostats'
                 '-f', 'vapoursynth', '-i', $Job.ScriptFile
                 '-f', 'yuv4mpegpipe', '-strict', '-1', '-'
             )
-            $encArgs = @('--output', $Job.VideoEncoded, '--input', '-') + $Job.EncoderParams
+            $cmd="$($global:VideoTools.FFmpeg) $($ffmpegArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
+            Write-Log $cmd -Severity Verbose -Category 'Video'
+            $Job.CommandLines+=@{'EncodeVideo'=$cmd}
+
             & $global:VideoTools.FFmpeg $ffmpegArgs | & $Job.EncoderPath $encArgs
         } else {
+            Write-Log "Запуск через vspipe" -Severity Verbose -Category 'Video'
             $vspipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
-            $encArgs = @('--output', $Job.VideoEncoded, '--input', '-') + $Job.EncoderParams
             
-            if ($Job.VPYInfo.Frames -gt 0) {
-                $encArgs = @('--frames', $Job.VPYInfo.Frames) + $encArgs
-            }
-            
+            $cmd="$($global:VideoTools.VSPipe) $($vspipeArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
+            Write-Log $cmd -Severity Verbose -Category 'Video'
+            $Job.CommandLines+=@{'EncodeVideo'=$cmd}
+
             & $global:VideoTools.VSPipe $vspipeArgs | & $Job.EncoderPath $encArgs
         }
     }
@@ -182,7 +227,7 @@ function Invoke-Encoder {
         throw "Encoding failed with exit code: $LASTEXITCODE"
     }
     
-    if (-not (Test-Path $Job.VideoEncoded)) {
+    if (-not (Test-Path -LiteralPath $Job.VideoEncoded)) {
         throw "Encoded video not created: $($Job.VideoEncoded)"
     }
 }

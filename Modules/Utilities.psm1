@@ -480,7 +480,7 @@ function Get-VideoScriptInfo {
     param ([Parameter(Mandatory)][string]$ScriptPath)
     
     try {
-        $vspInfo = (& vspipe --info $ScriptPath 2>&1)
+        $vspInfo = (& vspipe --info $ScriptPath) # 2>&1)
         
         if ($LASTEXITCODE -ne 0) {
             throw "Ошибка выполнения vspipe: $vspInfo"
@@ -597,11 +597,11 @@ function Get-EncoderPath {
         # Получаем базовое имя энкодера
         $baseEncoder = $EncoderName -split '\.' | Select-Object -First 1
         
-        if (-not $global:Config.Encoding.AvailableEncoders.ContainsKey($baseEncoder)) {
+        if (-not $global:Config.AvailableEncoders.ContainsKey($baseEncoder)) {
             throw "Энкодер '$baseEncoder' не найден в AvailableEncoders"
         }
         
-        $encoderPathRef = $global:Config.Encoding.AvailableEncoders[$baseEncoder]
+        $encoderPathRef = $global:Config.AvailableEncoders[$baseEncoder]
         $pathParts = $encoderPathRef -split '\.'
         
         $current = $global:Config
@@ -689,8 +689,8 @@ function Get-EncoderCode {
     
     try {
         # Сначала проверяем, есть ли код в EncoderCodes
-        if ($global:Config.Encoding.EncoderCodes.ContainsKey($EncoderName)) {
-            return $global:Config.Encoding.EncoderCodes[$EncoderName]
+        if ($global:Config.EncoderCodes.ContainsKey($EncoderName)) {
+            return $global:Config.EncoderCodes[$EncoderName]
         }
         
         # Если нет, получаем конфиг и проверяем там
@@ -914,7 +914,7 @@ function Get-VideoStats {
     
     try {
         $videoFile = Get-Item -LiteralPath $VideoFilePath -ErrorAction Stop
-        
+        Write-Log "Получение статистики видеофайла: $($videoFile.FullName)" -Severity Information -Category 'Video'
         # Get all video stream info in one ffprobe call
         $streamMetadata = & ffprobe -v error -select_streams v:0 `
             -show_entries stream `
@@ -1511,48 +1511,99 @@ function Convert-MP4ChaptersToXML {
 #>
 function Convert-MP4TagsToXml {
     [CmdletBinding()]
-    param([hashtable]$Tags, [string]$OutputFile)
+    param(
+        [Parameter(Mandatory)]
+        [PSObject]$Tags,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$OutputFile
+    )
     
+    # Преобразуем входные данные в хеш-таблицу
+    $tagsHash = if ($Tags -is [hashtable]) {
+        $Tags
+    } elseif ($Tags) {
+        @{}
+        $Tags.PSObject.Properties | ForEach-Object {
+            $tagsHash[$_.Name] = if ($_.Value -is [string]) { $_.Value } else { $_.Value.ToString() }
+        }
+    } else {
+        Write-Log "Tags is null or empty" -Severity Warning -Category 'Utils'
+        return $false
+    }
+
+    # Настройки XML
     $settings = [System.Xml.XmlWriterSettings]@{
         Indent = $true
         Encoding = [System.Text.Encoding]::UTF8
+        OmitXmlDeclaration = $false
     }
     
-    $writer = [System.Xml.XmlWriter]::Create($OutputFile, $settings)
-    
+    # Маппинг тегов
     $mapping = @{
         'title' = 'TITLE'
         'artist' = 'ARTIST'
         'album' = 'ALBUM'
         'date' = 'DATE_RELEASED'
+        'year' = 'DATE_RELEASED'
         'comment' = 'COMMENT'
         'genre' = 'GENRE'
         'encoder' = 'ENCODER'
+        'copyright' = 'COPYRIGHT'
+        'description' = 'DESCRIPTION'
+        'synopsis' = 'SUMMARY'
+        'show' = 'SHOWTITLE'
+        'episode_id' = 'PART_NUMBER'
+        'season_number' = 'SEASON_NUMBER'
+        'episode_number' = 'PART_NUMBER'
     }
     
-    $writer.WriteStartDocument()
-    $writer.WriteStartElement('Tags')
-    $writer.WriteStartElement('Tag')
-    $writer.WriteStartElement('Targets')
-    $writer.WriteElementString('TargetTypeValue', '50')
-    $writer.WriteEndElement()
-    
-    foreach ($key in $Tags.Keys) {
-        $value = $Tags[$key]
-        if ([string]::IsNullOrWhiteSpace($value)) { continue }
-        
-        $tagName = if ($mapping.ContainsKey($key.ToLower())) { $mapping[$key.ToLower()] } else { $key.ToUpper() }
-        
-        $writer.WriteStartElement('Simple')
-        $writer.WriteElementString('Name', $tagName)
-        $writer.WriteElementString('String', $value)
+    # Теги для исключения (регистронезависимый поиск)
+    $excludeTags = @('MAJOR_BRAND', 'COMPATIBLE_BRANDS', 'CREATION_TIME', 'MINOR_VERSION', 'ENCODER') | ForEach-Object { $_.ToLower() }
+    try {
+        $writer = [System.Xml.XmlWriter]::Create($OutputFile, $settings)
+
+        $writer.WriteStartDocument()
+        $writer.WriteStartElement('Tags')
+        $writer.WriteStartElement('Tag')
+        $writer.WriteStartElement('Targets')
+        $writer.WriteElementString('TargetTypeValue', '50')
         $writer.WriteEndElement()
+        
+        foreach ($key in $tagsHash.Keys) {
+            $lowerKey = $key.ToLower()
+
+            # Пропускаем исключённые теги
+            if ($lowerKey -in $excludeTags) { continue }
+
+            $value = $tagsHash[$key]
+            if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+            # Определяем имя тега
+            $tagName = if ($mapping.ContainsKey($lowerKey)) {
+                $mapping[$lowerKey]
+            } else {
+                $key.ToUpper()
+            }
+
+            $writer.WriteStartElement('Simple')
+            $writer.WriteElementString('Name', $tagName)
+            $writer.WriteElementString('String', [System.Security.SecurityElement]::Escape($value))
+            $writer.WriteEndElement()
+        }
+        $writer.WriteEndElement()
+        $writer.WriteEndElement()
+        $writer.WriteEndDocument()
+        $writer.Close()
+
+        Write-Log "Tags converted to XML: $OutputFile" -Severity Verbose -Category 'Utils'
+        return $true
     }
-    
-    $writer.WriteEndElement()
-    $writer.WriteEndElement()
-    $writer.WriteEndDocument()
-    $writer.Close()
+    catch {
+        Write-Log "Error converting tags to XML: $_" -Severity Error -Category 'Utils'
+        return $false
+    }
 }
 
 # Экспорт функций

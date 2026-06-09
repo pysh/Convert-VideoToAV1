@@ -27,22 +27,24 @@ function ConvertTo-Audio {
                 'opus' { 'opus' }
                 default { [IO.Path]::GetExtension($audio.Path).TrimStart('.') }
             }
-        } else {
+        }
+        else {
             if ($audioCodec -eq 'aac') { 'm4a' } else { 'opus' }
         }
         
         $fileName = "audio_{0:D2}[{1}]{2}.{3}" -f 
-            $audio.Index, $audio.Language, 
-            $(if ($audio.Title) { "_{$(Get-SafeFileName $audio.Title)}" } else { '' }),
-            $extension
+        $audio.Index, $audio.Language, 
+        $(if ($audio.Title) { "_{$(Get-SafeFileName $audio.Title)}" } else { '' }),
+        $extension
         
         $outputFile = Join-Path $outputDir $fileName
         
         if ($copyAudio -or -not $needConvert) {
             # Прямое копирование
-            Copy-Item $audio.Path $outputFile -Force
+            Copy-Item -LiteralPath $audio.Path $outputFile -Force
             Write-Log "Копирование: $fileName" -Severity Verbose -Category 'Audio'
-        } else {
+        }
+        else {
             # Перекодирование
             Write-Log "Перекодирование: $($audio.Codec) -> $audioCodec" -Severity Verbose -Category 'Audio'
             
@@ -55,20 +57,32 @@ function ConvertTo-Audio {
                 '-c:a', 'flac', '-compression_level', '8'
                 $tempFlac
             )
-            
+            $cmd="$($global:VideoTools.FFmpeg) $($ffmpegArgs -join ' ')"
+            Write-Log "Конвертация в FLAC: $cmd" -Severity Verbose -Category 'Audio'
+            $Job.CommandLines+=@{"ConvertToFLAC_$($audio.Index.ToString('00'))"=$cmd}
             & $global:VideoTools.FFmpeg $ffmpegArgs 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "FLAC conversion failed" }
             
             # Кодирование в целевой формат
             switch ($audioCodec) {
                 'opus' {
-                    $bitrate = if ($audio.Channels -le 2) { $bitrates.Stereo } else { $bitrates.Surround }
+                    # $bitrate = Get-BitrateForChannels -Channels $audio.Channels -Bitrates $bitrates
+                    $bitrate = if ($audio.Channels -le 2) {
+                        $bitrates.Stereo
+                    }
+                    elseif ($audio.Channels -le 6) {
+                        $bitrates.Surround
+                    }
+                    else {
+                        $bitrates.Multi
+                    }
                     $opusArgs = @(
-                        '--quiet', '--vbr', '--bitrate', $bitrate
-                        '--title', $audio.Title
-                        '--comment', "language=$($audio.Language)"
+                        "--quiet", "--vbr", "--bitrate", $bitRate
+                        $(if ($audio.Title) { "--title", "$($audio.Title)" })
+                        $(if ($audio.Language) { "--comment", "language=$($audio.Language)" })
                         $tempFlac, $outputFile
                     )
+                    $cmd = "$($global:VideoTools.OpusEnc) $($opusArgs -join ' ')"
                     & $global:VideoTools.OpusEnc $opusArgs
                 }
                 'aac' {
@@ -78,26 +92,29 @@ function ConvertTo-Audio {
                         '--title', $audio.Title
                         $tempFlac
                     )
+                    $cmd="$($global:VideoTools.QAAC) $($qaacArgs -join ' ')"
+                    Write-Log "Запуск QAAC: $cmd" -Severity Verbose -Category 'Audio'
                     & $global:VideoTools.QAAC $qaacArgs
                 }
                 default { throw "Unknown audio codec: $audioCodec" }
             }
             
             if ($LASTEXITCODE -ne 0) { throw "$audioCodec encoding failed" }
-            Remove-Item $tempFlac -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $tempFlac -Force -ErrorAction SilentlyContinue
         }
         
-        if (-not (Test-Path $outputFile)) { throw "Output file not created: $outputFile" }
+        if (-not (Test-Path -LiteralPath $outputFile)) { throw "Output file not created: $outputFile" }
         
         $Job.AudioEncodedSources += @{
-            Path = $outputFile
-            Index = $audio.Index
+            Path     = $outputFile
+            Index    = $audio.Index
             Language = $audio.Language
-            Title = $audio.Title
-            Default = $audio.Default
-            Forced = $audio.Forced
+            Title    = $audio.Title
+            Default  = $audio.Default
+            Forced   = $audio.Forced
+            SDH      = $audio.SDH
         }
-        
+        $Job.CommandLines+=@{"EncodeAudio_$($audio.Index.ToString('00'))"=$cmd}
         $Job.TempFiles.Add($outputFile)
     }
     

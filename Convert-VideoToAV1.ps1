@@ -65,7 +65,7 @@ begin {
 | |__| (_) | | | \ V /  __/ |  | ||_____\ V / | | (_| |  __/ (_) | | (_) / ___ \ V / | |
  \____\___/|_| |_|\_/ \___|_|   \__|     \_/  |_|\__,_|\___|\___/|_|\___/_/   \_\_/  |_|
 '@ -ForegroundColor DarkBlue
-    
+    $error.Clear()
     # Импорт модулей
     $modulesPath = Join-Path $PSScriptRoot 'Modules'
     $requiredModules = @(
@@ -80,7 +80,7 @@ begin {
     
     foreach ($module in $requiredModules) {
         $modulePath = Join-Path $modulesPath $module
-        if (-not (Test-Path $modulePath)) {
+        if (-not (Test-Path -LiteralPath $modulePath)) {
             throw "Module not found: $modulePath"
         }
         Import-Module $modulePath -Force -ErrorAction Stop
@@ -89,7 +89,7 @@ begin {
     
     # Инициализация конфигурации
     $configPath = Join-Path $PSScriptRoot 'config.psd1'
-    if (-not (Test-Path $configPath)) {
+    if (-not (Test-Path -LiteralPath $configPath)) {
         throw "Configuration file not found: $configPath"
     }
     
@@ -139,7 +139,7 @@ begin {
     
     # Проверка инструментов
     Write-Log "Checking required tools..." -Severity Information -Category 'Main'
-    foreach ($tool in $global:VideoTools.PSObject.Properties) {
+    foreach ($tool in $global:VideoTools.GetEnumerator()) {
         if (-not (Get-Command $tool.Value -ErrorAction SilentlyContinue)) {
             throw "Tool not found: $($tool.Name) -> $($tool.Value)"
         }
@@ -178,8 +178,8 @@ process {
                 $workingDir = Join-Path $TempDirectory "$baseName.tmp"
                 
                 # Очистка и создание рабочей директории
-                if (Test-Path $workingDir) {
-                    Remove-Item $workingDir -Recurse -Force -ErrorAction SilentlyContinue
+                if (Test-Path -LiteralPath $workingDir) {
+                    Remove-Item -LiteralPath $workingDir -Recurse -Force -ErrorAction SilentlyContinue
                 }
                 New-Item -ItemType Directory -Path $workingDir -Force | Out-Null
                 
@@ -206,9 +206,9 @@ process {
                 
                 # Копирование NFO файла
                 $nfoSource = [IO.Path]::ChangeExtension($videoFile.FullName, 'nfo')
-                if (Test-Path $nfoSource) {
+                if (Test-Path -LiteralPath $nfoSource) {
                     $nfoDestination = Join-Path $workingDir "$baseName.nfo"
-                    Copy-Item $nfoSource $nfoDestination -Force
+                    Copy-Item -LiteralPath $nfoSource $nfoDestination -Force
                     $job.NfoPath = $nfoDestination
                     $job.TempFiles.Add($nfoDestination)
                 }
@@ -251,10 +251,10 @@ process {
                     $height = $videoInfo.ResolutionHeight
                     
                     $resolution = switch ($width) {
-                        { $_ -gt 3840 } { '8k' }
-                        { $_ -gt 2560 } { '4k' }
-                        { $_ -gt 1920 } { '2k' }
-                        { $_ -gt 1280 } { '1080p' }
+                        { $_ -gt 3840 } { "8k"; break }
+                        { $_ -gt 2560 } { "4k"; break }
+                        { $_ -gt 1920 } { "2k"; break }
+                        { $_ -gt 1280 } { "1080p"; break }
                         default { "${height}p" }
                     }
                     
@@ -267,20 +267,22 @@ process {
                 $job.FinalOutput = Join-Path $OutputDirectory $outputFileName
                 
                 # Проверка существования выходного файла
-                if (-not $Force -and (Test-Path $job.FinalOutput)) {
+                if (-not $Force -and (Test-Path -LiteralPath $job.FinalOutput)) {
                     throw "Output file already exists: $outputFileName (use -Force to overwrite)"
                 }
                 
                 $job = Invoke-Mux -Job $job
                 
+                $job | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ("$($job.FinalOutput).json") -Force
+
                 # Итоговая статистика
                 $duration = [DateTime]::Now - $job.StartTime
-                $outputSize = (Get-Item $job.FinalOutput).Length / 1MB
+                $outputSize = (Get-Item -LiteralPath $job.FinalOutput).Length / 1MB
                 
                 Write-Log "`n" -Severity Information -Category 'Main'
                 Write-Log "COMPLETED!" -Severity Success -Category 'Main'
                 Write-Log "  File: $([IO.Path]::GetFileName($job.FinalOutput))" -Severity Success -Category 'Main'
-                Write-Log "  Size: {0:N2} MB" -f $outputSize -Severity Success -Category 'Main'
+                Write-Log "  Size: $($outputSize.ToString('N2')) MB" -Severity Success -Category 'Main'
                 Write-Log "  Time: $($duration.ToString('hh\:mm\:ss'))" -Severity Success -Category 'Main'
                 Write-Log ('=' * 60) -Severity Information -Category 'Main'
             }
@@ -290,14 +292,15 @@ process {
                 throw
             }
             finally {
-                if ($job -and -not $KeepTempFiles -and $global:Config.Processing.DeleteTempFiles) {
+                $global:Job = $job
+                if ($job -and -not $KeepTempFiles -and $global:Config.Processing.DeleteTempFiles -and (-not $error)) {
                     foreach ($file in $job.TempFiles) {
-                        if (Test-Path $file) {
-                            Remove-Item $file -Recurse -Force -ErrorAction SilentlyContinue
+                        if (Test-Path -LiteralPath $file) {
+                            Remove-Item -LiteralPath $file -Recurse -Force -ErrorAction SilentlyContinue
                         }
                     }
-                    if (Test-Path $job.WorkingDir) {
-                        Remove-Item $job.WorkingDir -Recurse -Force -ErrorAction SilentlyContinue
+                    if (Test-Path -LiteralPath $job.WorkingDir) {
+                        Remove-Item -LiteralPath $job.WorkingDir -Recurse -Force -ErrorAction SilentlyContinue
                     }
                 }
             }
