@@ -176,7 +176,9 @@ function Extract-AudioStreams {
             Codec = $stream.codec_name
             Channels = $stream.channels
             Default = $stream.disposition.default -eq 1
-            Forced = (($stream.disposition.forced -eq 1) -or ($title -eq 'forced'))
+            Forced = (($stream.disposition.forced -eq 1) -or ($title -match 'forced'))
+            SDH = (($stream.disposition.hearing_impaired -eq 1) -or ($title -match 'SDH'))
+            # Comment = $stream.disposition.comment
         }
         
         $Job.TempFiles.Add($outputFile)
@@ -223,8 +225,9 @@ function Extract-SubtitleStreams {
                 Name = $title
                 Codec = 'srt'
                 Default = $stream.disposition.default -eq 1
-                Forced = (($stream.disposition.forced -eq 1) -or ($title -eq 'forced'))
-                SDH = (($stream.disposition.hearing_impaired -eq 1) -or ($title -eq 'SDH'))
+                Forced = (($stream.disposition.forced -eq 1) -or ($title -match 'forced'))
+                SDH = (($stream.disposition.hearing_impaired -eq 1) -or ($title -match 'SDH'))
+                # Comment = $stream.disposition.comment
             }
             $Job.TempFiles.Add($outputFile)
         }

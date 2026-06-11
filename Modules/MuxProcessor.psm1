@@ -37,11 +37,12 @@ function Invoke-Mux {
     # Аудио
     foreach ($audio in $Job.AudioEncodedSources) {
         $mkvmergeArgs += @(
+            '--no-track-tags',
             '--language', "0:$($audio.Language)"
             '--track-name', "0:$($audio.Title)"
             '--default-track-flag', "0:$(if ($audio.Default) {'yes'} else {'no'})"
-            '--forced-display-flag', "0:$(if ($audio.Forced) {'yes'} else {'no'})"
-            '--hearing-impaired-flag', "0:$(if ($audio.Title -eq 'SDH') {'yes'} else {'no'})"
+            '--forced-display-flag', "0:$(if ($audio.Forced -or ($audio.Title -match 'Forced')) {'yes'} else {'no'})"
+            '--hearing-impaired-flag', "0:$(if ($audio.SDH -or ($audio.Title -match 'SDH')) {'yes'} else {'no'})"
             $audio.Path
         )
     }
@@ -49,9 +50,12 @@ function Invoke-Mux {
     # Субтитры
     foreach ($sub in $Job.SubtitleSources) {
         $mkvmergeArgs += @(
+            '--no-track-tags',
             '--language', "0:$($sub.Language)"
             '--track-name', "0:$($sub.Name)"
             '--default-track-flag', "0:$(if ($sub.Default) {'yes'} else {'no'})"
+            '--forced-display-flag', "0:$(if ($sub.Forced -or ($sub.Name -match 'Forced')) {'yes'} else {'no'})"
+            '--hearing-impaired-flag', "0:$(if ($sub.SDH -or ($sub.Name -match 'SDH')) {'yes'} else {'no'})"
             $sub.Path
         )
     }

@@ -42,7 +42,7 @@ param(
     [PSCustomObject]$CropParameters,
     
     [Parameter(Mandatory = $false)]
-    [string]$Encoder = 'SvtAv1EncESS.grain_optimized',
+    [string]$Encoder = 'SvtAv1Enc.grain',
     
     [Parameter(Mandatory = $false)]
     [string]$CustomTemplatePath,
@@ -285,15 +285,9 @@ process {
                 Write-Log "  Size: $($outputSize.ToString('N2')) MB" -Severity Success -Category 'Main'
                 Write-Log "  Time: $($duration.ToString('hh\:mm\:ss'))" -Severity Success -Category 'Main'
                 Write-Log ('=' * 60) -Severity Information -Category 'Main'
-            }
-            catch {
-                Write-Log "ERROR processing $($videoFile.Name): $($_.Exception.Message)" -Severity Error -Category 'Main'
-                Write-Log $_.ScriptStackTrace -Severity Debug -Category 'Main'
-                throw
-            }
-            finally {
-                $global:Job = $job
-                if ($job -and -not $KeepTempFiles -and $global:Config.Processing.DeleteTempFiles -and (-not $error)) {
+
+                # Удаляем временные файлы только если итоговый файл созан
+                if ($job -and -not $KeepTempFiles -and $global:Config.Processing.DeleteTempFiles) {
                     foreach ($file in $job.TempFiles) {
                         if (Test-Path -LiteralPath $file) {
                             Remove-Item -LiteralPath $file -Recurse -Force -ErrorAction SilentlyContinue
@@ -303,6 +297,14 @@ process {
                         Remove-Item -LiteralPath $job.WorkingDir -Recurse -Force -ErrorAction SilentlyContinue
                     }
                 }
+            }
+            catch {
+                Write-Log "ERROR processing $($videoFile.Name): $($_.Exception.Message)" -Severity Error -Category 'Main'
+                Write-Log $_.ScriptStackTrace -Severity Debug -Category 'Main'
+                throw
+            }
+            finally {
+                $global:Job = $job
             }
         }
     }
