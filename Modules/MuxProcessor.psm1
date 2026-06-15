@@ -21,10 +21,10 @@ function Invoke-Mux {
     # Заголовок файла
     if ($Job.NfoFields -and $Job.NfoFields.SHOWTITLE) {
         $title = "{0} - s{1:00}e{2:00} - {3}" -f 
-            $Job.NfoFields.SHOWTITLE,
-            ([int]($Job.NfoFields.SEASON_NUMBER ?? 1)),
-            ([int]($Job.NfoFields.PART_NUMBER ?? 1)),
-            ($Job.NfoFields.TITLE ?? 'Episode')
+        $Job.NfoFields.SHOWTITLE,
+        ([int]($Job.NfoFields.SEASON_NUMBER ?? 1)),
+        ([int]($Job.NfoFields.PART_NUMBER ?? 1)),
+        ($Job.NfoFields.TITLE ?? 'Episode')
         $mkvmergeArgs += '--title', $title
     }
     
@@ -68,14 +68,15 @@ function Invoke-Mux {
     # Глобальные теги
     if ($Job.NfoTags -and (Test-Path $Job.NfoTags)) {
         $mkvmergeArgs += '--global-tags', $Job.NfoTags
-    } elseif ($Job.TagsSource -and (Test-Path $Job.TagsSource)) {
+    }
+    elseif ($Job.TagsSource -and (Test-Path $Job.TagsSource)) {
         $mkvmergeArgs += '--global-tags', $Job.TagsSource
     }
     Write-Log "Запуск MkvMerge: $($mkvmergeArgs -join ' ')" -Severity Verbose -Category 'Mux'
 
-    $cmd="$($global:VideoTools.MkvMerge) $($mkvmergeArgs -join ' ')"
+    $cmd = "$($global:VideoTools.MkvMerge) $($mkvmergeArgs -join ' ')"
     Write-Log $cmd -Severity Verbose -Category 'Video'
-    $Job.CommandLines+=@{'FinalMKVMerge'=$cmd}
+    $Job.CommandLines += @{'FinalMKVMerge' = $cmd }
 
     & $global:VideoTools.MkvMerge $mkvmergeArgs
     
@@ -109,25 +110,29 @@ function Add-AttachmentsToMkv {
             '--add-attachment', $Job.CoverSource
         )
         Write-Log "Добавление обложки: $($Job.CoverSource)" -Severity Verbose -Category 'Mux'
-        $cmd="$($global:VideoTools.MkvPropedit) $($mkvPropEditArgs -join ' ')"
-        $Job.CommandLines+=@{FinalAttachCover=$cmd}
+        $cmd = "$($global:VideoTools.MkvPropedit) $($mkvPropEditArgs -join ' ')"
+        $Job.CommandLines += @{FinalAttachCover = $cmd }
 
-        & $global:VideoTools.MkvPropedit $mkvPropEditArgs 2>&1 | Out-Null
+        & $global:VideoTools.MkvPropedit $mkvPropEditArgs
         Write-Log "Обложка добавлена" -Severity Verbose -Category 'Mux'
     }
     
     # Вложения
+    $idx=0
     if ($Job.AttachmentSources) {
         foreach ($att in $Job.AttachmentSources) {
-            $mkvPropEditArgs = @($Job.FinalOutput, '--add-attachment', $att.Path)
-            if ($att.Name) { $mkvPropEditArgs += '--attachment-name', $att.Name }
-            if ($att.MimeType) { $mkvPropEditArgs += '--attachment-mime-type', $att.MimeType }
-
-            $cmd="$($global:VideoTools.MkvPropedit) $($mkvPropEditArgs -join ' ')"
+            $idx++
+            $att.Index = $idx
+            $mkvPropEditArgs = @($Job.FinalOutput
+                if ($att.Name) { '--attachment-name', $att.Name }
+                if ($att.MimeType) { '--attachment-mime-type', $att.MimeType }
+                '--add-attachment', $att.Path
+            )
+            $cmd = "$($global:VideoTools.MkvPropedit) $($mkvPropEditArgs -join ' ')"
             Write-Log $cmd -Severity Verbose -Category 'Audio'
-            $Job.CommandLines+=@{"AddAttachment_$($att.Index.ToString('00'))"=$cmd}
+            $Job.CommandLines += @{"AddAttachment_$($att.Index.ToString('00'))" = $cmd }
 
-            & $global:VideoTools.MkvPropedit $mkvPropEditArgs 2>&1 | Out-Null
+            & $global:VideoTools.MkvPropedit $mkvPropEditArgs
         }
     }
 }

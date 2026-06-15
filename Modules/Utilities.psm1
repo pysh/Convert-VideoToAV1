@@ -1292,244 +1292,148 @@ function Invoke-FreeTranslate {
     return $null
 }
 
-function Convert-MP4ChaptersToXML {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory, ParameterSetName = 'Json')]
-        [PSObject]$ChaptersJson,
+# function Convert-ChaptersToXML {
+#     [CmdletBinding()]
+#     param(
+#         [Parameter(Mandatory, ParameterSetName = 'Json')]
+#         [PSObject]$ChaptersJson,
         
-        [Parameter(Mandatory, ParameterSetName = 'File')]
-        [string]$InputFile,
+#         [Parameter(Mandatory, ParameterSetName = 'File')]
+#         [string]$InputFile,
         
-        [Parameter(Mandatory)]
-        [string]$OutputFile
-    )
+#         [Parameter(Mandatory)]
+#         [string]$OutputFile
+#     )
     
-    $chapters = if ($PSCmdlet.ParameterSetName -eq 'Json') {
-        $ChaptersJson.chapters
-    } else {
-        $content = Get-Content $InputFile -Raw
-        if ($content -match '\[CHAPTER\]') {
-            # Парсинг ffmetadata формата
-            $result = @()
-            $blocks = $content -split '\[CHAPTER\]'
-            foreach ($block in $blocks) {
-                if ($block -match 'START=(\d+)' -and $block -match 'END=(\d+)') {
-                    $startTick = [int64]$Matches[1]
-                    $endTick = [int64]$Matches[2]
-                    if ($block -match 'TIMEBASE=(\d+)\/(\d+)') {
-                        $tbNum = [int64]$Matches[1]
-                        $tbDen = [int64]$Matches[2]
-                        $startTime = $startTick / ($tbDen / $tbNum)
-                        $endTime = $endTick / ($tbDen / $tbNum)
-                    } else {
-                        $startTime = $startTick / 1000
-                        $endTime = $endTick / 1000
-                    }
-                    $title = if ($block -match 'title=(.+)') { $Matches[1] } else { "Chapter $($result.Count+1)" }
-                    $result += @{ start_time = $startTime; end_time = $endTime; title = $title }
-                }
-            }
-            $result
-        }
-    }
+#     $chapters = if ($PSCmdlet.ParameterSetName -eq 'Json') {
+#         $ChaptersJson.chapters
+#     } else {
+#         $content = Get-Content -LiteralPath $InputFile -Raw
+#         if ($content -match '\[CHAPTER\]') {
+#             $result = @()
+#             $blocks = $content -split '\[CHAPTER\]'
+#             foreach ($block in $blocks) {
+#                 if ($block -match 'START=(\d+)' -and $block -match 'END=(\d+)') {
+#                     $startTick = [int64]$Matches[1]
+#                     $endTick = [int64]$Matches[2]
+#                     if ($block -match 'TIMEBASE=(\d+)\/(\d+)') {
+#                         $tbNum = [int64]$Matches[1]
+#                         $tbDen = [int64]$Matches[2]
+#                         $startTime = $startTick / ($tbDen / $tbNum)
+#                         $endTime = $endTick / ($tbDen / $tbNum)
+#                     } else {
+#                         $startTime = $startTick / 1000
+#                         $endTime = $endTick / 1000
+#                     }
+#                     $title = if ($block -match 'title=(.+)') { $Matches[1].Trim() } else { "Chapter $($result.Count+1)" }
+#                     $result += @{ start_time = $startTime; end_time = $endTime; title = $title }
+#                 }
+#             }
+#             $result
+#         }
+#     }
     
-    if (-not $chapters -or $chapters.Count -eq 0) {
-        Write-Log "No chapters found" -Severity Warning -Category 'Utils'
-        return $false
-    }
+#     if (-not $chapters -or $chapters.Count -eq 0) {
+#         Write-Log "No chapters found" -Severity Warning -Category 'Utils'
+#         return $false
+#     }
     
-    $settings = [System.Xml.XmlWriterSettings]@{
-        Indent = $true
-        Encoding = [System.Text.Encoding]::UTF8
-        ConformanceLevel = [System.Xml.ConformanceLevel]::Document
-    }
+#     $settings = [System.Xml.XmlWriterSettings]@{
+#         Indent = $true
+#         Encoding = [System.Text.Encoding]::UTF8
+#         ConformanceLevel = [System.Xml.ConformanceLevel]::Document
+#     }
     
-    $writer = [System.Xml.XmlWriter]::Create($OutputFile, $settings)
+#     $writer = [System.Xml.XmlWriter]::Create($OutputFile, $settings)
     
-    $writer.WriteStartDocument()
-    $writer.WriteStartElement('Chapters')
-    $writer.WriteStartElement('EditionEntry')
-    $writer.WriteAttributeString('EditionUID', [System.Guid]::NewGuid().ToString())
+#     $writer.WriteStartDocument()
+#     $writer.WriteStartElement('Chapters')
+#     $writer.WriteStartElement('EditionEntry')
     
-    $counter = 1
-    foreach ($chapter in $chapters) {
-        $startTime = [TimeSpan]::FromSeconds([double]$chapter.start_time).ToString('hh\:mm\:ss\.fff')
-        $endTime = [TimeSpan]::FromSeconds([double]$chapter.end_time).ToString('hh\:mm\:ss\.fff')
-        $title = $chapter.title ?? "Chapter $counter"
+#     $counter = 1
+#     foreach ($chapter in $chapters) {
+#         $startTime = [TimeSpan]::FromSeconds([double]$chapter.start_time).ToString('hh\:mm\:ss\.fff')
+#         $endTime = [TimeSpan]::FromSeconds([double]$chapter.end_time).ToString('hh\:mm\:ss\.fff')
         
-        $writer.WriteStartElement('ChapterAtom')
-        $writer.WriteElementString('ChapterUID', [System.Guid]::NewGuid().ToString())
-        $writer.WriteElementString('ChapterTimeStart', $startTime)
-        $writer.WriteElementString('ChapterTimeEnd', $endTime)
-        $writer.WriteElementString('ChapterFlagHidden', '0')
-        $writer.WriteElementString('ChapterFlagEnabled', '1')
+#         # Универсальное получение названия главы
+#         $chapterTitle = $null
         
-        $writer.WriteStartElement('ChapterDisplay')
-        $writer.WriteElementString('ChapterString', $title)
-        $writer.WriteElementString('ChapterLanguage', 'eng')
-        $writer.WriteEndElement()
+#         # Пробуем разные варианты в зависимости от источника данных
+#         if ($chapter.tags -and $chapter.tags.title) {
+#             # MP4 формат (ffprobe)
+#             $chapterTitle = $chapter.tags.title
+#         }
+#         elseif ($chapter.properties -and $chapter.properties.title) {
+#             # MKV формат (mkvmerge)
+#             $chapterTitle = $chapter.properties.title
+#         }
+#         elseif ($chapter.title) {
+#             # Прямое свойство title
+#             $chapterTitle = $chapter.title
+#         }
         
-        $writer.WriteEndElement()
-        $counter++
-    }
+#         # Если название не найдено, используем дефолтное
+#         if ([string]::IsNullOrWhiteSpace($chapterTitle)) {
+#             $chapterTitle = "Chapter $counter"
+#         }
+        
+#         $writer.WriteStartElement('ChapterAtom')
+#         $writer.WriteElementString('ChapterTimeStart', $startTime)
+#         $writer.WriteElementString('ChapterTimeEnd', $endTime)
+#         $writer.WriteElementString('ChapterFlagHidden', '0')
+#         $writer.WriteElementString('ChapterFlagEnabled', '1')
+        
+#         $writer.WriteStartElement('ChapterDisplay')
+#         $writer.WriteElementString('ChapterString', $chapterTitle)
+#         $writer.WriteElementString('ChapterLanguage', 'eng')
+#         $writer.WriteEndElement()
+        
+#         $writer.WriteEndElement()
+#         $counter++
+#     }
     
-    $writer.WriteEndElement()
-    $writer.WriteEndElement()
-    $writer.WriteEndDocument()
-    $writer.Close()
+#     $writer.WriteEndElement() # EditionEntry
+#     $writer.WriteEndElement() # Chapters
+#     $writer.WriteEndDocument()
+#     $writer.Close()
     
-    Write-Log "Chapters converted to XML: $($chapters.Count)" -Severity Success -Category 'Utils'
-    return $true
-}
+#     Write-Log "Chapters converted to XML: $($chapters.Count) chapters" -Severity Success -Category 'Utils'
+#     return $true
+# }
 
-<# 
-function Convert-MP4ChaptersToXML {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory, ParameterSetName = 'File')]
-        [string]$InputFile,
-        
-        [Parameter(Mandatory, ParameterSetName = 'Json')]
-        [PSObject]$ChaptersJson,
-        
-        [Parameter(Mandatory)]
-        [string]$OutputFile
-    )
-    
-    try {
-        $chapters = $null
-        
-        if ($PSCmdlet.ParameterSetName -eq 'File') {
-            # Читаем из файла ffmetadata
-            if (-not (Test-Path -LiteralPath $InputFile)) {
-                throw "Файл не найден: $InputFile"
-            }
-            
-            $content = Get-Content -LiteralPath $InputFile -Raw -ErrorAction Stop
-            
-            if ($content -match '\[CHAPTER\]') {
-                $chapters = @()
-                $blocks = $content -split '\[CHAPTER\]'
-                
-                foreach ($block in $blocks) {
-                    if ($block -match 'TIMEBASE=(\d+)\/(\d+)' -and 
-                        $block -match 'START=(\d+)' -and 
-                        $block -match 'END=(\d+)') {
-                        
-                        $timebaseNum = [int64]$Matches[1]
-                        $timebaseDen = [int64]$Matches[2]
-                        $startTick = [int64]$Matches[3]
-                        $endTick = [int64]$Matches[4]
-                        
-                        $startTime = $startTick / ($timebaseDen / $timebaseNum)
-                        $endTime = $endTick / ($timebaseDen / $timebaseNum)
-                        
-                        $title = if ($block -match 'title=(.+)') { 
-                            $Matches[1].Trim() 
-                        } else { 
-                            "Chapter $($chapters.Count + 1)" 
-                        }
-                        
-                        $chapters += @{
-                            start_time = $startTime
-                            end_time = $endTime
-                            title = $title
-                        }
-                    }
-                }
-            }
-        }
-        else {
-            # Используем JSON из ffprobe
-            if (-not $ChaptersJson -or -not $ChaptersJson.chapters) {
-                throw "Некорректный JSON с главами"
-            }
-            $chapters = $ChaptersJson.chapters
-        }
-        
-        if (-not $chapters -or $chapters.Count -eq 0) {
-            Write-Log "Не найдено глав для конвертации" -Severity Verbose -Category 'Utils'
-            return $false
-        }
-        
-        # Создаем XML для mkvmerge
-        $settings = [System.Xml.XmlWriterSettings]@{
-            Indent = $true
-            Encoding = [System.Text.Encoding]::UTF8
-            ConformanceLevel = [System.Xml.ConformanceLevel]::Document
-        }
-        
-        $writer = [System.Xml.XmlWriter]::Create($OutputFile, $settings)
-        
-        try {
-            $writer.WriteStartDocument()
-            $writer.WriteStartElement("Chapters")
-            $writer.WriteStartElement("EditionEntry")
-            $writer.WriteAttributeString("EditionUID", [System.Guid]::NewGuid().ToString())
-            
-            $chapterCounter = 1
-            foreach ($chapter in $chapters) {
-                $startTime = [TimeSpan]::FromSeconds([double]$chapter.start_time).ToString("hh\:mm\:ss\.fff")
-                $endTime = [TimeSpan]::FromSeconds([double]$chapter.end_time).ToString("hh\:mm\:ss\.fff")
-                
-                $chapterTitle = if ($chapter.title) { $chapter.title } else { "Chapter $chapterCounter" }
-                $chapterUID = [System.Guid]::NewGuid().ToString()
-                
-                $writer.WriteStartElement("ChapterAtom")
-                $writer.WriteElementString("ChapterUID", $chapterUID)
-                $writer.WriteElementString("ChapterTimeStart", $startTime)
-                $writer.WriteElementString("ChapterTimeEnd", $endTime)
-                $writer.WriteElementString("ChapterFlagHidden", "0")
-                $writer.WriteElementString("ChapterFlagEnabled", "1")
-                
-                $writer.WriteStartElement("ChapterDisplay")
-                $writer.WriteElementString("ChapterString", $chapterTitle)
-                $writer.WriteElementString("ChapterLanguage", "eng")
-                $writer.WriteEndElement()
-                
-                $writer.WriteEndElement()
-                $chapterCounter++
-            }
-            
-            $writer.WriteEndElement()
-            $writer.WriteEndElement()
-            $writer.WriteEndDocument()
-            
-            Write-Log "XML глав создан: $OutputFile ($($chapters.Count) глав)" -Severity Success -Category 'Utils'
-            return $true
-        }
-        finally {
-            $writer.Close()
-        }
-    }
-    catch {
-        Write-Log "Ошибка конвертации глав в XML: $_" -Severity Warning -Category 'Utils'
-        return $false
-    }
-}
-#>
 function Convert-MP4TagsToXml {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [PSObject]$Tags,
-
+        
         [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
         [string]$OutputFile
     )
     
-    # Преобразуем входные данные в хеш-таблицу
-    $tagsHash = if ($Tags -is [hashtable]) {
-        $Tags
-    } elseif ($Tags) {
-        @{}
-        $Tags.PSObject.Properties | ForEach-Object {
-            $tagsHash[$_.Name] = if ($_.Value -is [string]) { $_.Value } else { $_.Value.ToString() }
+    # Преобразуем PSObject в Hashtable
+    $tagsHash = @{}
+    
+    if ($Tags -is [hashtable]) {
+        $tagsHash = $Tags
+    } 
+    elseif ($Tags -is [PSCustomObject] -or $Tags -is [PSObject]) {
+        foreach ($prop in $Tags.PSObject.Properties) {
+            $value = $prop.Value
+            if ($value -is [string]) {
+                $tagsHash[$prop.Name] = $value
+            } elseif ($value) {
+                $tagsHash[$prop.Name] = $value.ToString()
+            }
         }
-    } else {
-        Write-Log "Tags is null or empty" -Severity Warning -Category 'Utils'
+    }
+    else {
+        Write-Log "Invalid tags type: $($Tags.GetType())" -Severity Warning -Category 'Utils'
+        return $false
+    }
+    
+    if ($tagsHash.Count -eq 0) {
+        Write-Log "No valid tags to convert" -Severity Verbose -Category 'Utils'
         return $false
     }
 
@@ -1627,7 +1531,7 @@ Export-ModuleMember -Function `
     Get-VideoStats, `
     Get-VideoAutoCropParams, `
     Invoke-FreeTranslate, `
-    Convert-MP4ChaptersToXML, `
+    # Convert-ChaptersToXML, `
     Get-ScriptFrameRate, 
     Convert-MP4TagsToXml,
     Convert-VideoToAV1

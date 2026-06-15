@@ -140,7 +140,7 @@
                         Quality     = 32
                         Preset      = 3
                         BaseArgs    = @(
-                            '--lp', 4,
+                            # '--lp', 5,
                             '--rc', '0',
                             '--progress', 2
                             "--scm", 0,

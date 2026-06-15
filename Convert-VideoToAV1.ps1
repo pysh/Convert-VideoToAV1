@@ -62,7 +62,7 @@ begin {
   ____                          _     __     ___     _          _____       ___     ___ 
  / ___|___  _ ____   _____ _ __| |_   \ \   / (_) __| | ___  __|_   _|__   / \ \   / / |
 | |   / _ \| '_ \ \ / / _ \ '__| __|___\ \ / /| |/ _` |/ _ \/ _ \| |/ _ \ / _ \ \ / /| |
-| |__| (_) | | | \ V /  __/ |  | ||_____\ V / | | (_| |  __/ (_) | | (_) / ___ \ V / | |
+| |__| (_) | | | \ V /  __/ |  | |______\ V / | | (_| |  __/ (_) | | (_) / ___ \ V / | |
  \____\___/|_| |_|\_/ \___|_|   \__|     \_/  |_|\__,_|\___|\___/|_|\___/_/   \_\_/  |_|
 '@ -ForegroundColor DarkBlue
     $error.Clear()
@@ -286,18 +286,21 @@ process {
                 Write-Log "  Time: $($duration.ToString('hh\:mm\:ss'))" -Severity Success -Category 'Main'
                 Write-Log ('=' * 60) -Severity Information -Category 'Main'
 
-                # Удаляем временные файлы только если итоговый файл созан
+                # Удаляем временные файлы только если итоговый файл создан
                 if ($job -and -not $KeepTempFiles -and $global:Config.Processing.DeleteTempFiles) {
                     foreach ($file in $job.TempFiles) {
                         if (Test-Path -LiteralPath $file) {
-                            Remove-Item -LiteralPath $file -Recurse -Force -ErrorAction SilentlyContinue
+                                Write-Log "Deleting temporary file: $file" -Severity Verbose -Category 'Main'
+                                Remove-Item -LiteralPath $file -Recurse -Force -ErrorAction SilentlyContinue
+                            }
                         }
                     }
                     if (Test-Path -LiteralPath $job.WorkingDir) {
-                        Remove-Item -LiteralPath $job.WorkingDir -Recurse -Force -ErrorAction SilentlyContinue
+                        if (-not (Get-ChildItem -LiteralPath $job.WorkingDir -Recurse -File)) {
+                            Remove-Item -LiteralPath $job.WorkingDir -Force -ErrorAction SilentlyContinue
+                        }
                     }
                 }
-            }
             catch {
                 Write-Log "ERROR processing $($videoFile.Name): $($_.Exception.Message)" -Severity Error -Category 'Main'
                 Write-Log $_.ScriptStackTrace -Severity Debug -Category 'Main'

@@ -74,11 +74,11 @@ function Extract-VideoStream {
     $videoStream = $FileInfo.Streams | Where-Object { $_.codec_type -eq 'video' } | Select-Object -First 1
     if (-not $videoStream) { throw "Video stream not found" }
     
-    $extension = switch ($videoStream.codec_name) {
-        'hevc' { 'hevc' }
-        'h265' { 'hevc' }
-        default { 'h264' }
-    }
+    # $extension = switch ($videoStream.codec_name) {
+    #     'hevc' { 'hevc' }
+    #     'h265' { 'hevc' }
+    #     default { 'h264' }
+    # }
     
     $outputFile = Join-Path $OutputDir "video.mkv" # "video.$extension"
     if (Test-Path -LiteralPath $outputFile) {
@@ -241,18 +241,73 @@ function Extract-Chapters {
     param([hashtable]$Job, [object]$FileInfo, [string]$OutputDir)
     
     if (-not $FileInfo.Chapters -or $FileInfo.Chapters.Count -eq 0) {
+        Write-Log "No chapters found in file" -Severity Verbose -Category 'Demux'
         return $null
     }
     
     $outputFile = Join-Path $OutputDir 'chapters.xml'
     
-    $result = Convert-MP4ChaptersToXML -ChaptersJson @{ chapters = $FileInfo.Chapters } -OutputFile $outputFile
+    # Определяем формат исходного файла
+    $extension = [IO.Path]::GetExtension($Job.OriginalPath).ToLower()
     
-    if ($result) {
-        $Job.TempFiles.Add($outputFile)
-        return $outputFile
+    Write-Log "Extracting chapters from $extension file..." -Severity Information -Category 'Demux'
+    
+    try {
+        if ($extension -eq '.mkv') {
+            # MKV: Прямое использование mkvextract
+            & $global:VideoTools.MkvExtract $Job.OriginalPath chapters $outputFile 2>&1 | Out-Null
+            
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $outputFile)) {
+                # Проверяем, что файл не пустой
+                $fileInfo = Get-Item -LiteralPath $outputFile
+                if ($fileInfo.Length -gt 100) {
+                    Write-Log "Chapters extracted from MKV: $($FileInfo.Chapters.Count) chapters" -Severity Success -Category 'Demux'
+                    $Job.TempFiles.Add($outputFile)
+                    return $outputFile
+                } else {
+                    Write-Log "Chapters file is empty, no chapters to extract" -Severity Verbose -Category 'Demux'
+                    Remove-Item -LiteralPath $outputFile -Force -ErrorAction SilentlyContinue
+                    return $null
+                }
+            }
+        }
+        else {
+            # MP4/MOV/MP4: создаем временный MKV с главами и извлекаем XML
+            $tempMkv = Join-Path $OutputDir 'temp_chapters.mkv'
+            
+            # Создаем пустой MKV, содержащий только главы из исходного файла
+            & $global:VideoTools.MkvMerge `
+                --no-video --no-audio --no-subtitles --no-attachments `
+                --no-track-tags --no-global-tags `
+                -o $tempMkv $Job.OriginalPath 2>&1 | Out-Null
+            
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $tempMkv)) {
+                # Извлекаем главы из временного MKV
+                & $global:VideoTools.MkvExtract $tempMkv chapters $outputFile 2>&1 | Out-Null
+                
+                # Удаляем временный файл
+                Remove-Item -LiteralPath $tempMkv -Force -ErrorAction SilentlyContinue
+                
+                if (Test-Path -LiteralPath $outputFile) {
+                    $fileInfo = Get-Item -LiteralPath $outputFile
+                    if ($fileInfo.Length -gt 100) {
+                        Write-Log "Chapters extracted from MP4 and converted to XML: $($FileInfo.Chapters.Count) chapters" -Severity Success -Category 'Demux'
+                        $Job.TempFiles.Add($outputFile)
+                        return $outputFile
+                    } else {
+                        Write-Log "Chapters file is empty" -Severity Verbose -Category 'Demux'
+                        Remove-Item -LiteralPath $outputFile -Force -ErrorAction SilentlyContinue
+                        return $null
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        Write-Log "Failed to extract chapters: $_" -Severity Warning -Category 'Demux'
     }
     
+    Write-Log "No chapters to extract" -Severity Verbose -Category 'Demux'
     return $null
 }
 
