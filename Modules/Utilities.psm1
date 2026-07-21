@@ -32,7 +32,7 @@ function Initialize-Configuration {
     param([Parameter(Mandatory)][string]$ConfigPath)
     
     try {
-        if (-not (Test-Path -Path $ConfigPath -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
             throw "Файл конфигурации не найден"
         }
         $global:Config = Import-PowerShellDataFile -Path $ConfigPath
@@ -1510,6 +1510,772 @@ function Convert-MP4TagsToXml {
     }
 }
 
+function Get-VideoQualityMetrics2 {
+<#
+.SYNOPSIS
+    Calculates VMAF and XPSNR quality metrics for video files with parallel processing.
+.EXAMPLE
+    Get-VideoQualityMetrics -DistortedPaths @("enc1.mkv", "enc2.mkv") -ReferencePath "source.mkv" -Parallel
+.EXAMPLE
+    Get-VideoQualityMetrics -DistortedPaths "encoded.mkv" -ReferencePath "source.vpy"
+#>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$DistortedPaths,
+        
+        [Parameter(Mandatory)]
+        [string]$ReferencePath,
+
+        [ValidateSet('VMAF', 'XPSNR', 'Both')]
+        [string]$Metrics = 'VMAF',
+
+        [PSCustomObject]$Crop = @{
+            Left          = 0
+            Right         = 0
+            Top           = 0
+            Bottom        = 0
+            CropDistVideo = $false
+        },
+
+        [int]$TrimStartSeconds = 0,
+        [int]$DurationSeconds = 0,
+
+        [string]$ModelVersion = 'vmaf_4k_v0.6.1',
+
+        [int]$Threads = [Environment]::ProcessorCount,
+        [int]$Subsample = 1,
+
+        [string]$LogPath,
+
+        [ValidateSet('mean', 'harmonic_mean')]
+        [string]$PoolMethod = 'mean',
+        
+        [switch]$Parallel=$true
+    )
+    
+    # Validate files
+    if (-not (Test-Path -LiteralPath $ReferencePath)) {
+        throw "Reference file not found: $ReferencePath"
+    }
+    foreach ($file in $DistortedPaths) {
+        if (-not (Test-Path -LiteralPath $file)) {
+            throw "File not found: $file"
+        }
+    }
+    
+    # Helper function to detect file type
+    function Get-FileType {
+        param([string]$Path)
+        $ext = [IO.Path]::GetExtension($Path).ToLower()
+        if ($ext -eq '.vpy') { return 'VapourSynth' }
+        if ($ext -eq '.avs') { return 'AviSynth' }
+        return 'Video'
+    }
+
+    # Helper function to convert frame rate to double
+    function Convert-FpsToDouble {
+        <#
+        .SYNOPSIS
+            Конвертирует строковое представление FPS в число с плавающей точкой
+        #>
+        param ([string]$FpsString)
+
+        if ($FpsString -match '^\d+/\d+$') {
+            $numerator, $denominator = $FpsString -split '/'
+            return [double]$numerator / [double]$denominator
+        }
+        elseif ($FpsString -match '^\d+(\.\d+)?$') {
+            return [double]$FpsString
+        }
+        else {
+            throw "Некорректный формат FPS: $FpsString"
+        }
+    }    
+
+    # Helper function to get frame rate
+    function Get-FrameRate {
+        param([string]$Path, [string]$FileType)
+        
+        try {
+            if ($FileType -eq 'VapourSynth') {
+                $output = & vspipe -i $Path --info 2>&1
+                $fpsLine = $output | Where-Object { $_ -match 'FPS:\s*([\d\/]+(?:\.\d+)?)' }
+                if ($fpsLine) {
+                    $fps = [regex]::Match($fpsLine, 'FPS:\s*([\d\/]+(?:\.\d+)?)').Groups[1].Value
+                    return [double][Math]::Round((Convert-FpsToDouble -FpsString $fps), 3)
+                }
+            }
+            elseif ($FileType -eq 'AviSynth') {
+                $ffprobe = (Get-Command ffprobe -ErrorAction Stop).Source
+                $output = & $ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 $Path 2>&1
+                if ($LASTEXITCODE -eq 0 -and $output) {
+                    $fps = $output.Trim()
+                    if ($fps -match '(\d+)/(\d+)') {
+                        return [math]::Round([double]$Matches[1] / [double]$Matches[2], 3)
+                    }
+                    return [double]$fps
+                }
+            }
+            else {
+                $ffprobe = (Get-Command ffprobe -ErrorAction Stop).Source
+                $output = & $ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 $Path 2>&1
+                if ($LASTEXITCODE -eq 0 -and $output) {
+                    $fps = $output.Trim()
+                    if ($fps -match '(\d+)/(\d+)') {
+                        return [math]::Round([double]$Matches[1] / [double]$Matches[2], 3)
+                    }
+                    return [double]$fps
+                }
+            }
+        }
+        catch {}
+        return 25.0  # Default fallback
+    }
+    
+    # Detect file types and get frame rates
+    $refType = Get-FileType -Path $ReferencePath
+    $refFPS = Get-FrameRate -Path $ReferencePath -FileType $refType
+    
+    $distInfo = @{}
+    foreach ($path in $DistortedPaths) {
+        $type = Get-FileType -Path $path
+        $fps = Get-FrameRate -Path $path -FileType $type
+        $distInfo[$path] = @{ Type = $type; FPS = $fps }
+    }
+    
+    # Build filters (once for all videos)
+    $cropFilter = ''
+    if ($Crop.Left -or $Crop.Right -or $Crop.Top -or $Crop.Bottom) {
+        $cropFilter = "crop=w=iw-$($Crop.Left)-$($Crop.Right):h=ih-$($Crop.Top)-$($Crop.Bottom):x=$($Crop.Left):y=$($Crop.Top)"
+    }
+    
+    $trimFilter = ''
+    if ($TrimStartSeconds -gt 0 -or $DurationSeconds -gt 0) {
+        $trimFilter = if ($DurationSeconds -gt 0) {
+            "trim=start=${TrimStartSeconds}:duration=$DurationSeconds"
+        }
+        else {
+            "trim=start=$TrimStartSeconds"
+        }
+    }
+    
+    $baseFilter = "settb=AVTB,setpts=PTS-STARTPTS,format=yuv420p"
+    $commonFilters = @($trimFilter, $baseFilter) -ne '' -join ','
+    
+    # Build distorted video filters
+    $distFilters = @()
+    if ($Crop.CropDistVideo -and $cropFilter) { $distFilters += $cropFilter }
+    if ($commonFilters) { $distFilters += $commonFilters }
+    $distFilterStr = $distFilters -join ','
+
+    # Build reference video filters
+    $refFilters = @()
+    if ($cropFilter) { $refFilters += $cropFilter }
+    if ($commonFilters) { $refFilters += $commonFilters }
+    $refFilterStr = $refFilters -join ','
+
+    $filterTemplate = "[0:v]${distFilterStr}[dist];[1:v]${refFilterStr}[ref];"
+    
+    # Build VMAF filter
+    $vmafParams = @(
+        "eof_action=endall",
+        "n_threads=$Threads",
+        "n_subsample=$Subsample",
+        "model=version=$ModelVersion",
+        "pool=$PoolMethod"
+    )
+    if ($LogPath) {
+        $vmafParams += "log_path='$($LogPath.Replace('\', '\\'))'"
+        $vmafParams += "log_fmt=json"
+    }
+    $vmafFilter = "[dist][ref]libvmaf=$($vmafParams -join ':')"
+    $xpsnrFilter = "[dist][ref]xpsnr=eof_action=endall"
+    
+    # Header
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host "  VIDEO QUALITY METRICS" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Reference: $([IO.Path]::GetFileName($ReferencePath))" -ForegroundColor White
+    Write-Host "Reference Type: $refType, FPS: $refFPS" -ForegroundColor Gray
+    Write-Host "Files: $($DistortedPaths.Count)" -ForegroundColor White
+    Write-Host "Metrics: $Metrics" -ForegroundColor White
+    Write-Host "Threads: $(if ($Parallel) { $Threads } else { 'Sequential' })" -ForegroundColor White
+    Write-Host "========================================" -ForegroundColor Cyan
+    
+    # Get ffmpeg path
+    $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
+    
+    # Prepare job list
+    $jobs = @{}
+    $counter = 0
+    foreach ($path in $DistortedPaths) {
+        $counter++
+        $jobs["job_$counter"] = @{
+            Id             = $counter
+            Total          = $DistortedPaths.Count
+            DistortedPath  = $path
+            DistortedType  = $distInfo[$path].Type
+            DistortedFPS   = $distInfo[$path].FPS
+            ReferencePath  = $ReferencePath
+            ReferenceType  = $refType
+            ReferenceFPS   = $refFPS
+            FilterTemplate = $filterTemplate
+            VmafFilter     = $vmafFilter
+            XpsnrFilter    = $xpsnrFilter
+            Metrics        = $Metrics
+            FFmpegPath     = $ffmpeg
+        }
+    }
+    
+    # Process videos
+    # $results = if ($Parallel -and $DistortedPaths.Count -gt 1) {
+    #     Write-Host "Processing $($DistortedPaths.Count) videos in parallel..." -ForegroundColor Cyan
+        
+        $jobResults = $jobs.GetEnumerator() | ForEach-Object -Parallel {
+            $jobName = $_.Key
+            $job = $_.Value
+            
+            $ffmpeg = $job.FFmpegPath
+            
+            Write-Host "[$($job.Id)/$($job.Total)] Processing: $([IO.Path]::GetFileName($job.DistortedPath))" -ForegroundColor Yellow
+            
+            $result = [PSCustomObject]@{ 
+                ReferencePath = $job.ReferencePath
+                DistortedPath = $job.DistortedPath
+                VMAF          = $null
+                VMAFTimer     = $null
+                VMAFffargs    = $null
+                XPSNR         = $null
+                XPSNRTimer    = $null
+                XPSNRffargs   = $null
+                job           = $job
+            }
+            
+            # Build input arguments with proper FPS for each file
+            $distArgs = @()
+            $distArgs += '-r', ($job.DistortedFPS.ToString().Replace(',', '.'))
+            if ($job.DistortedType -eq 'VapourSynth') {
+                $distArgs += '-f', 'vapoursynth'
+            }
+            elseif ($job.DistortedType -eq 'AviSynth') {
+                $distArgs += '-f', 'avisynth'
+            }
+            $distArgs += '-i', $job.DistortedPath
+            
+            $refArgs = @()
+            $refArgs += '-r', ($job.ReferenceFPS.ToString().Replace(',', '.'))
+            if ($job.ReferenceType -eq 'VapourSynth') {
+                $refArgs += '-f', 'vapoursynth'
+            }
+            elseif ($job.ReferenceType -eq 'AviSynth') {
+                $refArgs += '-f', 'avisynth'
+            }
+            $refArgs += '-i', $job.ReferencePath
+            
+            if ($job.Metrics -in ('Both', 'VMAF')) {
+                $ffargs = @(
+                    "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
+                ) + $distArgs + $refArgs + @(
+                    "-filter_complex", "$($job.FilterTemplate)$($job.VmafFilter)"
+                    "-f", "null", "-"
+                )
+                $result.VMAFffargs = $ffargs
+                $VMAFTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                $output = & $ffmpeg $ffargs 2>&1
+                $VMAFTimer.Stop()
+                $result.VMAFTimer = $VMAFTimer
+                if ($output -join '`n' -match [regex]'(?m).*VMAF score: (?<vmaf>\d+\.+\d+).*') {
+                    $result.VMAF = [double]$Matches.vmaf
+                    Write-Host "VMAF calculation successful: $($result.VMAF)" -ForegroundColor DarkYellow
+                }
+                else {
+                    Write-Warning "VMAF calculation failed. Output: $($output -join "`n")"
+                    # Попробуем найти VMAF в другом формате вывода
+                    if ($output -join '`n' -match [regex]'VMAF score:\s*(\d+\.\d+)') {
+                        $result.VMAF = [double]$Matches[1]
+                        Write-Host "VMAF found (alternative pattern): $($result.VMAF)" -ForegroundColor DarkYellow
+                    }
+                    else {
+                        $result.VMAF = $null
+                    }
+                }
+            }
+            
+            if ($job.Metrics -in ('Both', 'XPSNR')) {
+                $ffargs = @(
+                    "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
+                ) + $distArgs + $refArgs + @(
+                    "-filter_complex", "$($job.FilterTemplate)$($job.XpsnrFilter)"
+                    "-f", "null", "-"
+                )
+                $XPSNRTimer = [System.Diagnostics.Stopwatch]::StartNew()
+                $output = & $ffmpeg $ffargs 2>&1
+                $XPSNRTimer.Stop()
+                $result.XPSNRTimer = $XPSNRTimer
+
+                # Ищем XPSNR в разных форматах вывода
+                # Формат 1: "XPSNR... y: XX.XX u: XX.XX v: XX.XX"
+                if ($output -join '`n' -match [regex]'(?m)XPSNR.*y:\s*(?<y>\d+\.\d+).*u:\s*(?<u>\d+\.\d+).*v:\s*(?<v>\d+\.\d+)') {
+                    $result.XPSNR = @{
+                        Y    = [double]$Matches['y']
+                        U    = [double]$Matches['u']
+                        V    = [double]$Matches['v']
+                        MIN  = (([double]$Matches['y'], [double]$Matches['u'], [double]$Matches['v']) | Measure-Object -Minimum).Minimum
+                        AVG  = ([double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 3
+                        WSUM = (4 * [double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 6
+                    }
+                    Write-Verbose "XPSNR calculation successful"
+                }
+                # # Формат 2: "PSNR y:XX.XX u:XX.XX v:XX.XX *"
+                # elseif ($output -join '`n' -match [regex]'(?m)PSNR.*y:\s*(?<y>\d+\.\d+).*u:\s*(?<u>\d+\.\d+).*v:\s*(?<v>\d+\.\d+)') {
+                #     $result.XPSNR = @{
+                #         Y    = [double]$Matches['y']
+                #         U    = [double]$Matches['u']
+                #         V    = [double]$Matches['v']
+                #         MIN  = (([double]$Matches['y'], [double]$Matches['u'], [double]$Matches['v']) | Measure-Object -Minimum).Minimum
+                #         AVG  = ([double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 3
+                #         WSUM = (4 * [double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 6
+                #     }
+                #     Write-Verbose "XPSNR calculation successful (pattern 2)"
+                # }
+            }
+            Write-Host ""
+            return $result
+        } -ThrottleLimit ([Math]::Min($DistortedPaths.Count, $Threads))
+        
+        # Конвертируем результаты в массив
+        $results = @($jobResults)
+    # }
+    # else {
+    #     $results = @()
+    #     $counter = 0
+        
+    #     foreach ($path in $DistortedPaths) {
+    #         $counter++
+    #         Write-Progress -Activity "Calculating metrics" `
+    #             -Status "[$counter/$($DistortedPaths.Count)] $([IO.Path]::GetFileName($path))" `
+    #             -PercentComplete (($counter / $DistortedPaths.Count) * 100) -Id 1
+            
+    #         Write-Host "[$counter/$($DistortedPaths.Count)] Processing: $([IO.Path]::GetFileName($path))" -ForegroundColor Yellow
+            
+    #         $result = [PSCustomObject]@{ 
+    #             Path  = $path
+    #             VMAF  = $null
+    #             XPSNR = $null
+    #         }
+            
+    #         $distType = $distInfo[$path].Type
+    #         $distFPS = $distInfo[$path].FPS
+            
+    #         # Build input arguments
+    #         $distArgs = @()
+    #         $distArgs += '-r', ($distFPS.ToString().Replace(',', '.'))
+    #         if ($distType -eq 'VapourSynth') {
+    #             $distArgs += '-f', 'vapoursynth'
+    #         }
+    #         elseif ($distType -eq 'AviSynth') {
+    #             $distArgs += '-f', 'avisynth'
+    #         }
+    #         $distArgs += '-i', $path
+            
+    #         $refArgs = @()
+    #         $refArgs += '-r', ($refFPS.ToString().Replace(',', '.'))
+    #         if ($refType -eq 'VapourSynth') {
+    #             $refArgs += '-f', 'vapoursynth'
+    #         }
+    #         elseif ($refType -eq 'AviSynth') {
+    #             $refArgs += '-f', 'avisynth'
+    #         }
+    #         $refArgs += '-i', $ReferencePath
+            
+    #         if ($Metrics -in ('Both', 'VMAF')) {
+    #             Write-Host "  Calculating VMAF..." -ForegroundColor Gray -NoNewline
+    #             $ffargs = @(
+    #                 "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
+    #             ) + $distArgs + $refArgs + @(
+    #                 "-filter_complex", "$filterTemplate$vmafFilter"
+    #                 "-f", "null", "-"
+    #             )
+    #             $output = & $ffmpeg $ffargs 2>&1
+    #             if ($output -match 'VMAF score:\s*(\d+\.\d+)') {
+    #                 $result.VMAF = [double]$Matches[1]
+    #                 Write-Host " $($result.VMAF)" -ForegroundColor Green
+    #             }
+    #             else {
+    #                 Write-Host " FAILED" -ForegroundColor Red
+    #             }
+    #         }
+            
+    #         if ($Metrics -in ('Both', 'XPSNR')) {
+    #             Write-Host "  Calculating XPSNR..." -ForegroundColor Gray -NoNewline
+    #             $ffargs = @(
+    #                 "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
+    #             ) + $distArgs + $refArgs + @(
+    #                 "-filter_complex", "$filterTemplate$xpsnrFilter"
+    #                 "-f", "null", "-"
+    #             )
+    #             $output = & $ffmpeg $ffargs 2>&1
+    #             if ($output -match 'XPSNR.*y:\s*(\d+\.\d+).*u:\s*(\d+\.\d+).*v:\s*(\d+\.\d+)') {
+    #                 $result.XPSNR = [PSCustomObject]@{
+    #                     Y    = [double]$Matches[1]
+    #                     U    = [double]$Matches[2]
+    #                     V    = [double]$Matches[3]
+    #                     WSUM = (4 * [double]$Matches[1] + [double]$Matches[2] + [double]$Matches[3]) / 6
+    #                 }
+    #                 Write-Host " $($result.XPSNR.WSUM)" -ForegroundColor Green
+    #             }
+    #             # elseif ($output -match 'PSNR.*y:\s*(\d+\.\d+).*u:\s*(\d+\.\d+).*v:\s*(\d+\.\d+)') {
+    #             #     $result.XPSNR = [PSCustomObject]@{
+    #             #         Y    = [double]$Matches[1]
+    #             #         U    = [double]$Matches[2]
+    #             #         V    = [double]$Matches[3]
+    #             #         WSUM = (4 * [double]$Matches[1] + [double]$Matches[2] + [double]$Matches[3]) / 6
+    #             #     }
+    #             #     Write-Host " $($result.XPSNR.WSUM) (from PSNR)" -ForegroundColor Green
+    #             # }
+    #             else {
+    #                 Write-Host " FAILED" -ForegroundColor Red
+    #             }
+    #         }
+            
+    #         $results += $result
+    #     }
+    #     Write-Progress -Completed -Id 1
+    # }
+    
+    # Show results
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host "  RESULTS" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    
+    if ($results.Count -eq 0) {
+        Write-Host "  No results were calculated" -ForegroundColor Yellow
+    }
+    
+    $sorted = $results | Sort-Object { if ($_.VMAF) { $_.VMAF } else { 0 } } -Descending
+    
+    foreach ($r in $sorted) {
+        $name = [IO.Path]::GetFileName($r.Path)
+        $vmaf = if ($r.VMAF) { "{0:N2}" -f $r.VMAF } else { "N/A" }
+        $xpsnr = if ($r.XPSNR) { "{0:N2}" -f $r.XPSNR.WSUM } else { "N/A" }
+        
+        $color = if ($r.VMAF -and $r.VMAF -gt 90) { 'Green' } 
+        elseif ($r.VMAF -and $r.VMAF -gt 80) { 'Yellow' } 
+        else { 'Gray' }
+        
+        Write-Host "  $name" -ForegroundColor Gray
+        Write-Host "    VMAF : $vmaf" -ForegroundColor $color
+        Write-Host "    XPSNR: $xpsnr" -ForegroundColor Gray
+        Write-Host ""
+    }
+    Write-Host "========================================" -ForegroundColor Cyan
+    
+    return $results
+}
+
+function ConvertTo-LatinTranslit {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string]$Text,
+        
+        [Parameter()]
+        [ValidateSet('ISO', 'Scientific', 'BGN', 'Passport')]
+        [string]$Standard = 'ISO',
+        
+        [Parameter()]
+        [switch]$KeepDiacritics,
+        
+        [Parameter()]
+        [switch]$UseExtendedMapping,
+        
+        [Parameter()]
+        [switch]$Lowercase,
+        
+        [Parameter()]
+        [switch]$ReplaceSpaces,
+        
+        [Parameter()]
+        [string]$SpaceReplacement = '_',
+        
+        [Parameter()]
+        [switch]$RemoveSpecialChars,
+        
+        [Parameter()]
+        [string]$SpecialCharReplacement = '-',
+        
+        [Parameter()]
+        [switch]$IsFilePath
+    )
+    
+    begin {
+        # Функция создания словаря с учетом регистра
+        function New-CaseSensitiveDictionary {
+            $dict = [System.Collections.Generic.Dictionary[string,string]]::new(
+                [System.StringComparer]::InvariantCulture
+            )
+            return $dict
+        }
+        
+        # Основная таблица транслитерации по стандарту ISO 9:1995
+        $isoMap = New-CaseSensitiveDictionary
+        $isoMap.Add('А', 'A'); $isoMap.Add('Б', 'B'); $isoMap.Add('В', 'V'); $isoMap.Add('Г', 'G'); $isoMap.Add('Д', 'D')
+        $isoMap.Add('Е', 'E'); $isoMap.Add('Ё', 'Ë'); $isoMap.Add('Ж', 'Ž'); $isoMap.Add('З', 'Z'); $isoMap.Add('И', 'I')
+        $isoMap.Add('Й', 'J'); $isoMap.Add('К', 'K'); $isoMap.Add('Л', 'L'); $isoMap.Add('М', 'M'); $isoMap.Add('Н', 'N')
+        $isoMap.Add('О', 'O'); $isoMap.Add('П', 'P'); $isoMap.Add('Р', 'R'); $isoMap.Add('С', 'S'); $isoMap.Add('Т', 'T')
+        $isoMap.Add('У', 'U'); $isoMap.Add('Ф', 'F'); $isoMap.Add('Х', 'H'); $isoMap.Add('Ц', 'C'); $isoMap.Add('Ч', 'Č')
+        $isoMap.Add('Ш', 'Š'); $isoMap.Add('Щ', 'Ŝ'); $isoMap.Add('Ъ', 'ʺ'); $isoMap.Add('Ы', 'Y'); $isoMap.Add('Ь', 'ʹ')
+        $isoMap.Add('Э', 'È'); $isoMap.Add('Ю', 'Û'); $isoMap.Add('Я', 'Â')
+        $isoMap.Add('а', 'a'); $isoMap.Add('б', 'b'); $isoMap.Add('в', 'v'); $isoMap.Add('г', 'g'); $isoMap.Add('д', 'd')
+        $isoMap.Add('е', 'e'); $isoMap.Add('ё', 'ë'); $isoMap.Add('ж', 'ž'); $isoMap.Add('з', 'z'); $isoMap.Add('и', 'i')
+        $isoMap.Add('й', 'j'); $isoMap.Add('к', 'k'); $isoMap.Add('л', 'l'); $isoMap.Add('м', 'm'); $isoMap.Add('н', 'n')
+        $isoMap.Add('о', 'o'); $isoMap.Add('п', 'p'); $isoMap.Add('р', 'r'); $isoMap.Add('с', 's'); $isoMap.Add('т', 't')
+        $isoMap.Add('у', 'u'); $isoMap.Add('ф', 'f'); $isoMap.Add('х', 'h'); $isoMap.Add('ц', 'c'); $isoMap.Add('ч', 'č')
+        $isoMap.Add('ш', 'š'); $isoMap.Add('щ', 'ŝ'); $isoMap.Add('ъ', 'ʺ'); $isoMap.Add('ы', 'y'); $isoMap.Add('ь', 'ʹ')
+        $isoMap.Add('э', 'è'); $isoMap.Add('ю', 'û'); $isoMap.Add('я', 'â')
+        
+        # Расширенное отображение для имён файлов
+        $extendedMap = New-CaseSensitiveDictionary
+        $extendedMap.Add('А', 'A'); $extendedMap.Add('Б', 'B'); $extendedMap.Add('В', 'V'); $extendedMap.Add('Г', 'G'); $extendedMap.Add('Д', 'D')
+        $extendedMap.Add('Е', 'E'); $extendedMap.Add('Ё', 'E'); $extendedMap.Add('Ж', 'Zh'); $extendedMap.Add('З', 'Z'); $extendedMap.Add('И', 'I')
+        $extendedMap.Add('Й', 'Y'); $extendedMap.Add('К', 'K'); $extendedMap.Add('Л', 'L'); $extendedMap.Add('М', 'M'); $extendedMap.Add('Н', 'N')
+        $extendedMap.Add('О', 'O'); $extendedMap.Add('П', 'P'); $extendedMap.Add('Р', 'R'); $extendedMap.Add('С', 'S'); $extendedMap.Add('Т', 'T')
+        $extendedMap.Add('У', 'U'); $extendedMap.Add('Ф', 'F'); $extendedMap.Add('Х', 'Kh'); $extendedMap.Add('Ц', 'Ts'); $extendedMap.Add('Ч', 'Ch')
+        $extendedMap.Add('Ш', 'Sh'); $extendedMap.Add('Щ', 'Sch'); $extendedMap.Add('Ъ', ''); $extendedMap.Add('Ы', 'Y'); $extendedMap.Add('Ь', '')
+        $extendedMap.Add('Э', 'E'); $extendedMap.Add('Ю', 'Yu'); $extendedMap.Add('Я', 'Ya')
+        $extendedMap.Add('а', 'a'); $extendedMap.Add('б', 'b'); $extendedMap.Add('в', 'v'); $extendedMap.Add('г', 'g'); $extendedMap.Add('д', 'd')
+        $extendedMap.Add('е', 'e'); $extendedMap.Add('ё', 'e'); $extendedMap.Add('ж', 'zh'); $extendedMap.Add('з', 'z'); $extendedMap.Add('и', 'i')
+        $extendedMap.Add('й', 'y'); $extendedMap.Add('к', 'k'); $extendedMap.Add('л', 'l'); $extendedMap.Add('м', 'm'); $extendedMap.Add('н', 'n')
+        $extendedMap.Add('о', 'o'); $extendedMap.Add('п', 'p'); $extendedMap.Add('р', 'r'); $extendedMap.Add('с', 's'); $extendedMap.Add('т', 't')
+        $extendedMap.Add('у', 'u'); $extendedMap.Add('ф', 'f'); $extendedMap.Add('х', 'kh'); $extendedMap.Add('ц', 'ts'); $extendedMap.Add('ч', 'ch')
+        $extendedMap.Add('ш', 'sh'); $extendedMap.Add('щ', 'sch'); $extendedMap.Add('ъ', ''); $extendedMap.Add('ы', 'y'); $extendedMap.Add('ь', '')
+        $extendedMap.Add('э', 'e'); $extendedMap.Add('ю', 'yu'); $extendedMap.Add('я', 'ya')
+        
+        # Функция клонирования словаря
+        function Clone-Dictionary {
+            param([System.Collections.Generic.Dictionary[string,string]]$Source)
+            $clone = New-CaseSensitiveDictionary
+            foreach ($key in $Source.Keys) {
+                $clone.Add($key, $Source[$key])
+            }
+            return $clone
+        }
+        
+        # Создание карты для выбранного стандарта
+        $standardMap = Clone-Dictionary -Source $isoMap
+        
+        switch ($Standard) {
+            'Passport' {
+                $standardMap['Е'] = 'E'; $standardMap['Ё'] = 'E'; $standardMap['Ж'] = 'Zh'; $standardMap['Й'] = 'Y'
+                $standardMap['Х'] = 'Kh'; $standardMap['Ц'] = 'Ts'; $standardMap['Ч'] = 'Ch'; $standardMap['Ш'] = 'Sh'
+                $standardMap['Щ'] = 'Shch'; $standardMap['Ы'] = 'Y'; $standardMap['Ю'] = 'Yu'; $standardMap['Я'] = 'Ya'
+                $standardMap['е'] = 'e'; $standardMap['ё'] = 'e'; $standardMap['ж'] = 'zh'; $standardMap['й'] = 'y'
+                $standardMap['х'] = 'kh'; $standardMap['ц'] = 'ts'; $standardMap['ч'] = 'ch'; $standardMap['ш'] = 'sh'
+                $standardMap['щ'] = 'shch'; $standardMap['ы'] = 'y'; $standardMap['ю'] = 'yu'; $standardMap['я'] = 'ya'
+                $standardMap['ъ'] = ''; $standardMap['ь'] = ''
+            }
+            'BGN' {
+                $standardMap['Е'] = 'Ye'; $standardMap['Ё'] = 'Yo'; $standardMap['Ж'] = 'Zh'; $standardMap['Й'] = 'Y'
+                $standardMap['Х'] = 'Kh'; $standardMap['Ц'] = 'Ts'; $standardMap['Ч'] = 'Ch'; $standardMap['Ш'] = 'Sh'
+                $standardMap['Щ'] = 'Shch'; $standardMap['Ы'] = 'Y'; $standardMap['Ю'] = 'Yu'; $standardMap['Я'] = 'Ya'
+                $standardMap['е'] = 'ye'; $standardMap['ё'] = 'yo'; $standardMap['ж'] = 'zh'; $standardMap['й'] = 'y'
+                $standardMap['х'] = 'kh'; $standardMap['ц'] = 'ts'; $standardMap['ч'] = 'ch'; $standardMap['ш'] = 'sh'
+                $standardMap['щ'] = 'shch'; $standardMap['ы'] = 'y'; $standardMap['ю'] = 'yu'; $standardMap['я'] = 'ya'
+                $standardMap['ъ'] = ''; $standardMap['ь'] = ''
+            }
+            'Scientific' {
+                $standardMap['Е'] = 'E'; $standardMap['Ё'] = 'Ë'; $standardMap['Ж'] = 'Ž'; $standardMap['Й'] = 'J'
+                $standardMap['Х'] = 'H'; $standardMap['Ц'] = 'C'; $standardMap['Ч'] = 'Č'; $standardMap['Ш'] = 'Š'
+                $standardMap['Щ'] = 'Šč'; $standardMap['Ы'] = 'Y'; $standardMap['Ю'] = 'Ju'; $standardMap['Я'] = 'Ja'
+                $standardMap['е'] = 'e'; $standardMap['ё'] = 'ë'; $standardMap['ж'] = 'ž'; $standardMap['й'] = 'j'
+                $standardMap['х'] = 'h'; $standardMap['ц'] = 'c'; $standardMap['ч'] = 'č'; $standardMap['ш'] = 'š'
+                $standardMap['щ'] = 'šč'; $standardMap['ы'] = 'y'; $standardMap['ю'] = 'ju'; $standardMap['я'] = 'ja'
+            }
+        }
+        
+        # Выбор карты транслитерации
+        $map = if ($UseExtendedMapping) { $extendedMap } else { $standardMap }
+        
+        # Паттерн для русских букв
+        $pattern = '[А-Яа-яЁё]'
+        
+        # Функция транслитерации строки
+        function Convert-String {
+            param([string]$InputString)
+            
+            if ([string]::IsNullOrEmpty($InputString)) {
+                return $InputString
+            }
+            
+            $result = $InputString -replace $pattern, {
+                $char = $_.Value
+                if ($map.ContainsKey($char)) {
+                    return $map[$char]
+                }
+                return $char
+            }
+            
+            return $result
+        }
+        
+        # Функция очистки имени
+        function Clean-Name {
+            param([string]$Name)
+            
+            if ($RemoveSpecialChars) {
+                $Name = $Name -replace '[^a-zA-Z0-9\s\-_.]', $SpecialCharReplacement
+            }
+            
+            if ($ReplaceSpaces) {
+                $Name = $Name -replace '\s+', $SpaceReplacement
+            }
+            
+            if ($Lowercase) {
+                $Name = $Name.ToLowerInvariant()
+            }
+            
+            if (-not $KeepDiacritics) {
+                $Name = $Name.Normalize([System.Text.NormalizationForm]::FormD)
+                $Name = $Name -replace '[^\u0000-\u007F]', ''
+                $Name = $Name -replace '\p{M}', ''
+            }
+            
+            # Удаление лишних разделителей
+            $Name = $Name -replace '_{2,}', '_'
+            $Name = $Name -replace '-{2,}', '-'
+            $Name = $Name -replace '^[\s_\-]+|[\s_\-]+$', ''
+            
+            return $Name
+        }
+    }
+    
+    process {
+        if ([string]::IsNullOrWhiteSpace($Text)) {
+            Write-Warning "Входная строка пуста"
+            return $Text
+        }
+        
+        $result = $Text
+        
+        if ($IsFilePath) {
+            # Проверяем, является ли путь UNC (начинается с \\)
+            $isUnc = $result.StartsWith('\\')
+            
+            # Разбиваем путь на части
+            $parts = $result -split '[\\/]'
+            $processedParts = @()
+            
+            foreach ($part in $parts) {
+                if ([string]::IsNullOrEmpty($part)) {
+                    # Сохраняем пустые части для UNC путей
+                    $processedParts += $part
+                    continue
+                }
+                
+                # Проверяем, является ли часть буквой диска (C:, D:, и т.д.)
+                if ($part -match '^[A-Za-z]:$') {
+                    $processedParts += $part
+                    continue
+                }
+                
+                # Транслитерируем часть пути
+                $translitPart = Convert-String -InputString $part
+                $cleanedPart = Clean-Name -Name $translitPart
+                $processedParts += $cleanedPart
+            }
+            
+            # Собираем путь обратно с сохранением разделителей
+            if ($isUnc) {
+                # Для UNC путей сохраняем двойной слеш в начале
+                $result = '\\' + ($processedParts -join '\')
+            } else {
+                # Определяем исходный разделитель
+                if ($result -contains '/') {
+                    $result = $processedParts -join '/'
+                } else {
+                    $result = $processedParts -join '\'
+                }
+                
+                # Восстанавливаем начальный слеш для корневых путей
+                if ($result.StartsWith('\')) {
+                    $result = '\' + $result.TrimStart('\')
+                }
+            }
+        } else {
+            # Обычная транслитерация всего текста
+            $result = Convert-String -InputString $Text
+            $result = Clean-Name -Name $result
+            
+            # Очистка от недопустимых символов для имён файлов (только если не путь)
+            if (-not $IsFilePath) {
+                $result = $result -replace '[<>:"/\\|?*]', ''
+            }
+        }
+        
+        return $result
+    }
+}
+
+# Примеры использования
+<#
+# 1. Транслитерация простого текста
+"Привет мир!" | ConvertTo-LatinTranslit
+
+# 2. Транслитерация имени файла
+"Мой файл.txt" | ConvertTo-LatinTranslit -ReplaceSpaces -SpaceReplacement '_'
+
+# 3. Полная транслитерация пути (все папки и файлы)
+"C:\Users\Иван\Documents\Мой проект\отчет 2024.pdf" | ConvertTo-LatinTranslit -IsFilePath -ReplaceSpaces -SpaceReplacement '_'
+# Результат: C:\Users\Ivan\Documents\Moi_proekt\otchet_2024.pdf
+
+# 4. UNC путь
+"\\SERVER\Share\Общая папка\документ.docx" | ConvertTo-LatinTranslit -IsFilePath -ReplaceSpaces -Lowercase
+# Результат: \\SERVER\Share\obshaya_papka\dokument.docx
+
+# 5. Путь с сетевым диском
+"Z:\Проекты\2024\Отчеты\финальный отчет.xlsx" | ConvertTo-LatinTranslit -IsFilePath -ReplaceSpaces -UseExtendedMapping
+# Результат: Z:\Proekty\2024\Otchety\finalnyi_otchet.xlsx
+
+# 6. Пакетная обработка файлов с переименованием
+Get-ChildItem -Recurse -Filter *.txt | ForEach-Object {
+    $newPath = $_.FullName | ConvertTo-LatinTranslit -IsFilePath -ReplaceSpaces -Lowercase -RemoveSpecialChars
+    if ($newPath -ne $_.FullName) {
+        Rename-Item -Path $_.FullName -NewName (Split-Path $newPath -Leaf) -WhatIf
+    }
+}
+
+# 7. Переименование папок (только имя папки, без изменения структуры)
+$folder = "C:\Projects\Старый проект"
+$newFolderName = (Split-Path $folder -Leaf) | ConvertTo-LatinTranslit -ReplaceSpaces
+$newPath = Join-Path (Split-Path $folder -Parent) $newFolderName
+Rename-Item -Path $folder -NewName $newFolderName -WhatIf
+#>
+
+function Export-AsLossless {
+    [CmdletBinding()]
+    param(
+        [string]$encApp = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-Essential\SvtAv1EncApp.exe',
+        [string]$inFile = 'r:\Temp\Lead.Children.S01E01.2160p.HDR.H.265.Master5_EncodingTests\Lead.Children.S01E01.2160p.HDR.H.265.Master5.vpy',
+        [string]$outFile = 'g:\.temp\Lead.Children.S01E01.2160p.HDR.H.265.Master5.ivf'
+    )
+
+    try {
+        $output = & vspipe.exe -c y4m $inFile - | & $encApp --input - --output $outFile --lossless 1 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            return $outFile
+        } else {
+            Write-Error "Encoding failed (exit code $LASTEXITCODE): $output"
+            return $null
+        }
+    }
+    catch {
+        Write-Error "Error during encoding: $_"
+        return $null
+    }
+}
+
 # Экспорт функций
 Export-ModuleMember -Function `
     Initialize-Configuration, `
@@ -1532,6 +2298,6 @@ Export-ModuleMember -Function `
     Get-VideoAutoCropParams, `
     Invoke-FreeTranslate, `
     # Convert-ChaptersToXML, `
-    Get-ScriptFrameRate, 
-    Convert-MP4TagsToXml,
-    Convert-VideoToAV1
+    Get-ScriptFrameRate, `
+    Convert-MP4TagsToXml, `
+    Convert-VideoToAV1, Get-VideoQualityMetrics2, ConvertTo-LatinTranslit, Export-AsLossless

@@ -165,10 +165,13 @@ function Invoke-Encoder {
     $isHEVC = $Job.EncoderName -match 'x265'
     
     if ($isHEVC) {
-        $supportsVpy = Test-X265VpySupport -X265Path $Job.EncoderPath
+        $supportsVpy = $false #Test-X265VpySupport -X265Path $Job.EncoderPath
         
         if ($supportsVpy) {
-            $encArgs = @('--input', $Job.ScriptFile, '--output', $Job.VideoEncoded) + $Job.EncoderParams
+            $encArgs = @(
+                '--reader-options', 'library=X:\Apps\_VideoEncoding\StaxRip\Apps\FrameServer\VapourSynth\VSScript.dll'
+                '--input', $Job.ScriptFile, '--output', $Job.VideoEncoded
+                ) + $Job.EncoderParams
             Write-Log "Запуск x265 с прямым чтением VPY" -Severity Verbose -Category 'Video'
             
             $cmd="$($Job.EncoderPath) $($encArgs -join ' ')"
@@ -179,7 +182,11 @@ function Invoke-Encoder {
         } else {
             Write-Log "Запуск x265 через vspipe" -Severity Verbose -Category 'Video'
             $vspipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
-            $encArgs = @('--output', $Job.VideoEncoded, '--input', '-') + $Job.EncoderParams
+            $encArgs = @(
+                '--y4m',
+                '--output', $Job.VideoEncoded
+                '--input', '-'
+                ) + $Job.EncoderParams
 
             $cmd="$($global:VideoTools.VSPipe) $($vspipeArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
             Write-Log $cmd -Severity Verbose -Category 'Video'

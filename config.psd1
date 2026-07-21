@@ -6,7 +6,7 @@
         MkvMerge       = "mkvmerge.exe"
         MkvExtract     = "mkvextract.exe"
         MkvPropedit    = "mkvpropedit.exe"
-        VSPipe         = "C:\Program Files\VapourSynth\core\vspipe.exe"
+        VSPipe         = "c:\Python313\Lib\site-packages\vapoursynth\vspipe.exe"
         x265           = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\x265\x265.exe'
         SvtAv1Enc      = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp\SvtAv1EncApp.exe'
         SvtAv1EncESS   = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-Essential\SvtAv1EncApp.exe'
@@ -76,7 +76,7 @@
                 Multi    = "360k"
             }
             AAC = @{
-                Quality = 110 # 91, 100, 109
+                Quality = 91 # 91, 100, 109
                 ProfileHE = $false
             }
         }
@@ -92,11 +92,12 @@
                     main = @{
                         DisplayName = "x265 Main"
                         CodecCode   = 'hevc'
-                        Quality     = 27
+                        Quality     = 24
                         Preset      = 'slow'
                         BaseArgs    = @(
+                            # '--frame-threads', 12,
                             '--output-depth', '10',
-                            '--no-strong-intra-smoothing',
+                            # '--no-strong-intra-smoothing',
                             '--range', 'limited',
                             '--colorprim', 'bt709',
                             '--transfer', 'bt709',
@@ -123,27 +124,48 @@
                     main = @{
                         DisplayName = "SVT-AV1 Main Preset"
                         CodecCode   = 'av1'
-                        Quality     = 36
+                        Quality     = 27
                         Preset      = 3
                         BaseArgs    = @(
+                            '--rc', 0,
+                            '--progress', 2,
+                            '--enable-qm' ,1,
+                            '--color-range', 0,
+                            '--color-primaries', 1,
+                            '--transfer-characteristics', 1,
+                            '--matrix-coefficients', 1
+                        )
+                    }
+                    FAM = @{
+                        DisplayName = "SVT-AV1 Grain"
+                        CodecCode   = 'av1'
+                        Quality     = 41
+                        Preset      = 4
+                        BaseArgs    = @(
                             '--rc', '0',
-                            '--progress', '2',
+                            '--progress', 2,
+                            '--scm', 2,
+                            '--enable-qm' ,1,
+                            # '--tune', 2,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 10,
                             '--color-range', '0'
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                        )
+                            )
                     }
+
                     grain = @{
                         DisplayName = "SVT-AV1 Grain"
                         CodecCode   = 'av1'
-                        Quality     = 32
+                        Quality     = 27
                         Preset      = 3
                         BaseArgs    = @(
-                            # '--lp', 5,
                             '--rc', '0',
-                            '--progress', 2
-                            "--scm", 0,
+                            '--progress', 2,
+                            '--enable-qm' ,1,
+                            # '--tune', 2,
                             "--film-grain-denoise", 0,
                             "--film-grain", 10,
                             '--color-range', '0'
@@ -154,22 +176,22 @@
                     }
                 }
                 SvtAv1EncESS = @{
-                    grain_optimized = @{
+                    grain = @{
                         DisplayName = "SVT-AV1 Film Grain"
                         CodecCode   = 'av1'
-                        Quality     = 'medium'
-                        Speed       = 'slow'
+                        Quality     = 'high'
+                        Speed       = ''
                         BaseArgs    = @(
-                            '--rc', '0',
-                            '--progress', '3',
-                            '--auto-tiling', '0',
-                            '--aq-mode', '2',
-                            '--film-grain-denoise', '0',
-                            '--film-grain', '12',
-                            '--color-range', '0',
-                            '--color-primaries', '1',
-                            '--transfer-characteristics', '1',
-                            '--matrix-coefficients', '1'
+                            '--rc', 0,
+                            '--preset', 3,
+                            '--progress', 3,
+                            '--auto-tiling', 0,
+                            '--film-grain-denoise', 0,
+                            '--film-grain', 10,
+                            '--color-range', 0,
+                            '--color-primaries', 1,
+                            '--transfer-characteristics', 1,
+                            '--matrix-coefficients', 1
                         )
                     }
                     main = @{

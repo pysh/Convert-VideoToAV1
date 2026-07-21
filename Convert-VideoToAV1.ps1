@@ -175,7 +175,7 @@ process {
                 Write-Log ('=' * 60) -Severity Information -Category 'Main'
                 
                 $baseName = [IO.Path]::GetFileNameWithoutExtension($videoFile.Name)
-                $workingDir = Join-Path $TempDirectory "$baseName.tmp"
+                $workingDir = Join-Path $TempDirectory ("$baseName.tmp" | ConvertTo-LatinTranslit -Standard Passport)
                 
                 # Очистка и создание рабочей директории
                 if (Test-Path -LiteralPath $workingDir) {
@@ -297,7 +297,7 @@ process {
                     }
                     if (Test-Path -LiteralPath $job.WorkingDir) {
                         if (-not (Get-ChildItem -LiteralPath $job.WorkingDir -Recurse -File)) {
-                            Remove-Item -LiteralPath $job.WorkingDir -Force -ErrorAction SilentlyContinue
+                            Remove-Item -LiteralPath $job.WorkingDir -Recurse -Force -ErrorAction SilentlyContinue
                         }
                     }
                 }

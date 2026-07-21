@@ -1,9 +1,10 @@
 param(
-    [string]$InputDir = 'v:\Сериалы\Зарубежные\Ради всего человечества (For All Mankind)\For All Mankind (Season 5) DV HDR10 WEB-DL 2160p\',
-    [string]$Encoder  = "SvtAv1Enc.grain",
-    [string]$InputFilter, #'^(?!.*S05e0[1-4]).*$',
+    [string]$InputDir = 'v:\Сериалы\Отечественные\Условный мент\сезон 06\Uslovnyj.ment.s06.2025.IPTV.1080p.by.ivandubskoj\',
+    [string]$Encoder  = "x265.main",
+    [string]$InputFilter = 'e3[0-9]', #'^(?!.*20250219).*$',
     [switch]$CopyAudio,
-    [switch]$CopyVideo
+    [switch]$copyVideo,
+    [PSCustomObject]$CropParameters = @{Left=0;Top=0;Right=0;Bottom=0}
 )
 
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -14,7 +15,7 @@ $params = @{
     OutputDirectory = (Join-Path -Path $InputDir -ChildPath '.enc')
     Encoder        = $Encoder
     InputFilter    = $InputFilter
-    CropParameters = @{Left=0;Top=0;Right=0;Bottom=0}
+    CropParameters = $CropParameters #@{Left=0;Top=196;Right=0;Bottom=196}
     CustomTemplatePath = if(Test-Path -LiteralPath (Join-Path $InputDir -ChildPath 'template.vpy')) {Join-Path $InputDir -ChildPath 'template.vpy'}
     #KeepTempFiles = $false
 }
@@ -22,4 +23,4 @@ $params = @{
 if ($CopyAudio) { $params.CopyAudio = $true }
 if ($CopyVideo) { $params.CopyVideo = $true }
 
-& ".\Convert-VideoToAV1.ps1" @params -Debug -Verbose
+& ".\Convert-VideoToAV1.ps1" @params -Debug -Verbose -CopyAudio

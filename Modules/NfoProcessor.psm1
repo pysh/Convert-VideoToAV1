@@ -7,14 +7,14 @@ function Invoke-NfoProcessing {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable]$Job)
     
-    if (-not $Job.NfoPath -or -not (Test-Path $Job.NfoPath)) {
+    if (-not $Job.NfoPath -or -not (Test-Path -LiteralPath $Job.NfoPath)) {
         Write-Log "NFO файл не найден" -Severity Verbose -Category 'Metadata'
         return $Job
     }
     
     Write-Log "Обработка NFO: $([IO.Path]::GetFileName($Job.NfoPath))" -Severity Information -Category 'Metadata'
     
-    $nfoContent = Get-Content $Job.NfoPath -Raw -Encoding UTF8
+    $nfoContent = Get-Content -LiteralPath $Job.NfoPath -Raw -Encoding UTF8
     
     if ($nfoContent -match '^\s*<\?xml') {
         [xml]$xml = $nfoContent
@@ -26,7 +26,7 @@ function Invoke-NfoProcessing {
     $tagsFile = Join-Path $Job.WorkingDir 'nfo_tags.xml'
     $Job.NfoFields = Convert-NfoToTagsXml -Episode $episode -OutputFile $tagsFile
     
-    if (Test-Path $tagsFile) {
+    if (Test-Path -LiteralPath $tagsFile) {
         $Job.NfoTags = $tagsFile
         $Job.TempFiles.Add($tagsFile)
         Write-Log "NFO успешно конвертирован в XML теги" -Severity Success -Category 'Metadata'

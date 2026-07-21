@@ -61,15 +61,15 @@ function Invoke-Mux {
     }
     
     # Главы
-    if ($Job.ChaptersSource -and (Test-Path $Job.ChaptersSource)) {
+    if ($Job.ChaptersSource -and (Test-Path -LiteralPath $Job.ChaptersSource)) {
         $mkvmergeArgs += '--chapters', $Job.ChaptersSource
     }
     
     # Глобальные теги
-    if ($Job.NfoTags -and (Test-Path $Job.NfoTags)) {
+    if ($Job.NfoTags -and (Test-Path -LiteralPath $Job.NfoTags)) {
         $mkvmergeArgs += '--global-tags', $Job.NfoTags
     }
-    elseif ($Job.TagsSource -and (Test-Path $Job.TagsSource)) {
+    elseif ($Job.TagsSource -and (Test-Path -LiteralPath $Job.TagsSource)) {
         $mkvmergeArgs += '--global-tags', $Job.TagsSource
     }
     Write-Log "Запуск MkvMerge: $($mkvmergeArgs -join ' ')" -Severity Verbose -Category 'Mux'
@@ -94,7 +94,7 @@ function Add-AttachmentsToMkv {
     param([hashtable]$Job)
     
     # Обложка
-    if ($Job.CoverSource -and (Test-Path $Job.CoverSource)) {
+    if ($Job.CoverSource -and (Test-Path -LiteralPath $Job.CoverSource)) {
         $ext = [IO.Path]::GetExtension($Job.CoverSource).ToLower()
         $mimeType = switch ($ext) {
             '.jpg' { 'image/jpeg' }

@@ -324,18 +324,18 @@ function Extract-GlobalTags {
     $outputFile = Join-Path $OutputDir 'tags.xml'
     
     try {
-        Convert-MP4TagsToXml -Tags $FileInfo.Format.tags -OutputFile $outputFile
+        $result = Convert-MP4TagsToXml -Tags $FileInfo.Format.tags -OutputFile $outputFile
         
-        if (Test-Path $outputFile) {
+        if (Test-Path -LiteralPath $outputFile) {
             # Проверяем, что файл не пустой
-            $content = Get-Content $outputFile -Raw
+            $content = Get-Content -LiteralPath $outputFile -Raw
             if ($content -match '<Simple>') {
                 $Job.TempFiles.Add($outputFile)
                 Write-Log "Global tags extracted: $outputFile" -Severity Verbose -Category 'Demux'
                 return $outputFile
             } else {
                 Write-Log "No meaningful tags found" -Severity Verbose -Category 'Demux'
-                Remove-Item $outputFile -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $outputFile -Force -ErrorAction SilentlyContinue
                 return $null
             }
         }
@@ -386,7 +386,7 @@ function Extract-CoverAndAttachments {
         Write-Log "Extracting attachments with FFmpeg arguments: $($ffmpegArgs -join ' ')" -Severity Verbose -Category 'Demux'
         & $global:VideoTools.FFmpeg $ffmpegArgs 2>&1 | Out-Null
         
-        if (Test-Path $outputFile) {
+        if (Test-Path -LiteralPath $outputFile) {
             $isCover = $fileName -match 'cover|poster|folder'
             
             if ($isCover -and -not $result.Cover) {
@@ -444,7 +444,7 @@ function Find-ExternalCover {
         
         # Поиск по регулярным выражениям
         try {
-            $allFiles = Get-ChildItem -Path $Directory -File -ErrorAction SilentlyContinue
+            $allFiles = Get-ChildItem -LiteralPath $Directory -File -ErrorAction SilentlyContinue
             
             foreach ($pattern in $coverRegexPatterns) {
                 $matchingFiles = $allFiles | Where-Object { $_.Name -match $pattern }
