@@ -40,6 +40,11 @@ function ConvertTo-Video {
     $scriptContent = New-VapourSynthScript -Job $Job -TemplatePath $selectedTemplate
     Set-Content -LiteralPath $Job.ScriptFile -Value $scriptContent -Force -Encoding UTF8
     $Job.TempFiles.Add($Job.ScriptFile)
+    $Job.TempFiles.Add($Job.CacheFile)
+    $Job.TempFiles.Add(("$($Job.VideoSource).0.bsindex"))
+    $Job.TempFiles.Add(([IO.Path]::ChangeExtension($Job.VideoSource,'dgi')))
+    $Job.TempFiles.Add(([IO.Path]::ChangeExtension($Job.VideoSource,'log')))
+    $Job.TempFiles.Add(([IO.Path]::ChangeExtension($Job.VideoSource,'lwi')))
     
     # ============================================
     # ПОЛУЧАЕМ ИНФОРМАЦИЮ О СКРИПТЕ ДО КОДИРОВАНИЯ

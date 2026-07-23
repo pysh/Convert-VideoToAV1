@@ -92,7 +92,7 @@
                     main = @{
                         DisplayName = "x265 Main"
                         CodecCode   = 'hevc'
-                        Quality     = 24
+                        Quality     = 23
                         Preset      = 'slow'
                         BaseArgs    = @(
                             # '--frame-threads', 12,
@@ -113,6 +113,21 @@
                             '--tune', 'grain',
                             '--output-depth', '10',
                             '--no-strong-intra-smoothing',
+                            '--range', 'limited',
+                            '--colorprim', 'bt709',
+                            '--transfer', 'bt709',
+                            '--colormatrix', 'bt709'
+                        )
+                    }
+                    UMent = @{
+                        DisplayName = "x265 Main"
+                        CodecCode   = 'hevc'
+                        Quality     = 24
+                        Preset      = 'slow'
+                        BaseArgs    = @(
+                            # '--frame-threads', 12,
+                            '--output-depth', '10',
+                            # '--no-strong-intra-smoothing',
                             '--range', 'limited',
                             '--colorprim', 'bt709',
                             '--transfer', 'bt709',

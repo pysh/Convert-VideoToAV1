@@ -1,7 +1,7 @@
 param(
     [string]$InputDir = 'v:\Сериалы\Отечественные\Условный мент\сезон 06\Uslovnyj.ment.s06.2025.IPTV.1080p.by.ivandubskoj\',
-    [string]$Encoder  = "x265.main",
-    [string]$InputFilter = 'e3[0-9]', #'^(?!.*20250219).*$',
+    [string]$Encoder  = "x265.UMent",
+    [string]$InputFilter = 'e6[0-9]', #'^(?!.*20250219).*$',
     [switch]$CopyAudio,
     [switch]$copyVideo,
     [PSCustomObject]$CropParameters = @{Left=0;Top=0;Right=0;Bottom=0}
