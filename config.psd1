@@ -102,7 +102,7 @@
                             '--range', 'limited',
                             '--colorprim', 'bt709',
                             '--transfer', 'bt709',
-                            '--colormatrix', 'bt709'
+                            '--colormatrix', 'bt709',
                         )
                     }
                     grain = @{
@@ -117,7 +117,7 @@
                             '--range', 'limited',
                             '--colorprim', 'bt709',
                             '--transfer', 'bt709',
-                            '--colormatrix', 'bt709'
+                            '--colormatrix', 'bt709',
                         )
                     }
                     UMent = @{
@@ -132,7 +132,7 @@
                             '--range', 'limited',
                             '--colorprim', 'bt709',
                             '--transfer', 'bt709',
-                            '--colormatrix', 'bt709'
+                            '--colormatrix', 'bt709',
                         )
                     }
                 }
@@ -165,11 +165,11 @@
                             # '--tune', 2,
                             # "--film-grain-denoise", 0,
                             # "--film-grain", 10,
-                            '--color-range', '0'
+                            '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                            )
+                        )
                     }
 
                     grain = @{
@@ -184,11 +184,11 @@
                             # '--tune', 2,
                             "--film-grain-denoise", 0,
                             "--film-grain", 10,
-                            '--color-range', '0'
+                            '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                            )
+                        )
                     }
                 }
                 SvtAv1EncESS = @{
@@ -218,11 +218,11 @@
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', '3',
-                            '--color-range', '0'
+                            '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                            )
+                        )
                     }
                 }
                 # ============================================
