@@ -170,7 +170,7 @@ function Invoke-Encoder {
     $isHEVC = $Job.EncoderName -match 'x265'
     
     if ($isHEVC) {
-        $supportsVpy = $false #Test-X265VpySupport -X265Path $Job.EncoderPath
+        $supportsVpy = $false # Test-X265VpySupport -X265Path $Job.EncoderPath
         
         if ($supportsVpy) {
             $encArgs = @(
@@ -181,6 +181,7 @@ function Invoke-Encoder {
             
             $cmd="$($Job.EncoderPath) $($encArgs -join ' ')"
             Write-Log $cmd -Severity Verbose -Category 'Video'
+            Write-Host $cmd -ForegroundColor Gray
             $Job.CommandLines+=@{'EncodeVideo'=$cmd}
 
             & $Job.EncoderPath $encArgs

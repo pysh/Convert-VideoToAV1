@@ -121,7 +121,16 @@ function Extract-AudioStreams {
     param([hashtable]$Job, [object]$FileInfo, [string]$OutputDir)
     
     $audioStreams = $FileInfo.Streams | Where-Object { $_.codec_type -eq 'audio' }
+    if ($audioStreams -and -not ($audioStreams -is [array])) {
+        $audioStreams = @($audioStreams)
+    }
+    
     $result = @()
+    
+    if (-not $audioStreams -or $audioStreams.Count -eq 0) {
+        Write-Log "Аудиодорожки не найдены" -Severity Warning -Category 'Demux'
+        return $result
+    }
     
     $index = 0
     foreach ($stream in $audioStreams) {
@@ -161,11 +170,12 @@ function Extract-AudioStreams {
             $outputFile
         )
 
-        Write-Log "Extracting audio stream with FFmpeg arguments: $($ffmpegArgs -join ' ')" -Severity Verbose -Category 'Demux'
-        & $global:VideoTools.FFmpeg $ffmpegArgs
+        Write-Log "Извлечение аудиопотока ${index}: $($ffmpegArgs -join ' ')" -Severity Verbose -Category 'Demux'
+        & $global:VideoTools.FFmpeg $ffmpegArgs 2>&1 | Out-Null
         
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $outputFile)) {
-            throw "Failed to extract audio stream $index (exit code: $LASTEXITCODE)"
+            Write-Log "Ошибка извлечения аудиопотока $index (код: $LASTEXITCODE)" -Severity Warning -Category 'Demux'
+            continue
         }
         
         $result += @{
@@ -178,7 +188,6 @@ function Extract-AudioStreams {
             Default = $stream.disposition.default -eq 1
             Forced = (($stream.disposition.forced -eq 1) -or ($title -match 'forced'))
             SDH = (($stream.disposition.hearing_impaired -eq 1) -or ($title -match 'SDH'))
-            # Comment = $stream.disposition.comment
         }
         
         $Job.TempFiles.Add($outputFile)
@@ -192,6 +201,9 @@ function Extract-SubtitleStreams {
     param([hashtable]$Job, [object]$FileInfo, [string]$OutputDir)
     
     $subtitleStreams = $FileInfo.Streams | Where-Object { $_.codec_type -eq 'subtitle' }
+    if ($subtitleStreams -and -not ($subtitleStreams -is [array])) {
+        $subtitleStreams = @($subtitleStreams)
+    }
     $result = @()
     
     $index = 0
@@ -370,7 +382,9 @@ function Extract-CoverAndAttachments {
     $attachments = $FileInfo.Streams | Where-Object { 
         $_.codec_type -eq 'attachment' -or ($_.disposition.attached_pic -eq 1)
     }
-    
+    if ($attachments -and -not ($attachments -is [array])) {
+        $attachments = @($attachments)
+    }
     foreach ($attachment in $attachments) {
         $fileName = $attachment.tags.filename ?? "attach_$($attachment.index).dat"
         $outputFile = Join-Path $OutputDir $fileName

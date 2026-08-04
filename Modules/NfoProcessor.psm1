@@ -56,57 +56,105 @@ function Convert-NfoToTagsXml {
     $writer.WriteElementString('TargetTypeValue', '50')
     $writer.WriteEndElement()
     
-    # Основные поля
-    $basicFields = @{
-        TITLE = $Episode.title
-        ORIGINAL_TITLE = $Episode.originaltitle
-        SUMMARY = $Episode.plot
-        DATE_RELEASED = $Episode.premiered
-        AIR_DATE = $Episode.aired
-        PART_NUMBER = $Episode.episode
-        SEASON_NUMBER = $Episode.season
-        SHOWTITLE = $Episode.showtitle
-        DIRECTOR = $Episode.director
-        GENRE = $Episode.genre
-        RATING = $Episode.rating
-    }
-    
-    foreach ($field in $basicFields.GetEnumerator()) {
-        $value = $field.Value
-        if ($value -and -not [string]::IsNullOrWhiteSpace($value.ToString())) {
-            $fields[$field.Key] = $value.ToString()
-            
-            $writer.WriteStartElement('Simple')
-            $writer.WriteElementString('Name', $field.Key)
-            $writer.WriteElementString('String', $value.ToString())
-            $writer.WriteEndElement()
+    # Вспомогательная функция для получения уникальных значений
+    function Get-UniqueValues {
+        param($Value)
+        
+        if ($null -eq $Value) {
+            return @()
         }
+        
+        $array = if ($Value -is [array]) { $Value } else { @($Value) }
+        
+        $array | 
+            Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace($_.ToString()) } |
+            ForEach-Object { $_.ToString().Trim() } |
+            Where-Object { $_ -ne '' } |
+            Select-Object -Unique
     }
     
-    # Студии
-    if ($Episode.studio) {
-        $studios = if ($Episode.studio -is [array]) { $Episode.studio } else { @($Episode.studio) }
-        foreach ($studio in $studios) {
-            if ($studio) {
+    # Функция для получения текстового значения узла (игнорируя атрибуты)
+    function Get-NodeText {
+        param($Node)
+        
+        if ($null -eq $Node) {
+            return $null
+        }
+        
+        if ($Node -is [array]) {
+            return $Node | ForEach-Object { $_.InnerText.Trim() }
+        }
+        
+        return $Node.InnerText.Trim()
+    }
+    
+    # Основные поля (все могут быть массивами)
+    $fieldMappings = @{
+        'TITLE'          = $Episode.title
+        'ORIGINAL_TITLE' = $Episode.originaltitle
+        'SUMMARY'        = $Episode.plot
+        'DATE_RELEASED'  = $Episode.premiered
+        'AIR_DATE'       = $Episode.aired
+        'PART_NUMBER'    = $Episode.episode
+        'SEASON_NUMBER'  = $Episode.season
+        'SHOWTITLE'      = $Episode.showtitle
+        'GENRE'          = $Episode.genre
+        'RATING'         = $Episode.rating
+        'STUDIO'         = $Episode.studio
+    }
+    
+    # Обработка director отдельно (берем только текст, игнорируя атрибуты)
+    $directorValues = Get-NodeText -Node $Episode.director
+    if ($directorValues) {
+        $fieldMappings['DIRECTOR'] = $directorValues
+    }
+    
+    foreach ($fieldName in $fieldMappings.Keys) {
+        $values = Get-UniqueValues -Value $fieldMappings[$fieldName]
+        
+        if ($values.Count -gt 0) {
+            $fields[$fieldName] = $values -join '; '
+            
+            foreach ($value in $values) {
                 $writer.WriteStartElement('Simple')
-                $writer.WriteElementString('Name', 'STUDIO')
-                $writer.WriteElementString('String', $studio)
+                $writer.WriteElementString('Name', $fieldName)
+                $writer.WriteElementString('String', $value)
                 $writer.WriteEndElement()
             }
         }
     }
     
-    # Уникальные идентификаторы
+    # Уникальные идентификаторы (отдельно в конце)
     if ($Episode.uniqueid) {
         $ids = if ($Episode.uniqueid -is [array]) { $Episode.uniqueid } else { @($Episode.uniqueid) }
+        
+        # Собираем все ID по типам, удаляя дубли
+        $uniqueIds = @{}
         foreach ($id in $ids) {
             $type = $id.type
             $value = $id.InnerText
-            if ($type -and $value) {
-                $writer.WriteStartElement('Simple')
-                $writer.WriteElementString('Name', $type.ToUpper())
-                $writer.WriteElementString('String', $value)
-                $writer.WriteEndElement()
+            if ($type -and $value -and -not [string]::IsNullOrWhiteSpace($value)) {
+                $key = $type.ToUpper().Trim()
+                $trimmedValue = $value.Trim()
+                
+                if (-not $uniqueIds.ContainsKey($key)) {
+                    $uniqueIds[$key] = [System.Collections.Generic.HashSet[string]]::new()
+                }
+                [void]$uniqueIds[$key].Add($trimmedValue)
+            }
+        }
+        
+        # Записываем уникальные ID
+        foreach ($key in $uniqueIds.Keys) {
+            $values = $uniqueIds[$key]
+            if ($values.Count -gt 0) {
+                $fields[$key] = $values -join '; '
+                foreach ($value in $values) {
+                    $writer.WriteStartElement('Simple')
+                    $writer.WriteElementString('Name', $key)
+                    $writer.WriteElementString('String', $value)
+                    $writer.WriteEndElement()
+                }
             }
         }
     }

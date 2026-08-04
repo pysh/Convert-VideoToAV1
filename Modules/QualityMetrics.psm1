@@ -66,11 +66,11 @@ function Get-VideoFrameRate {
             }
             default {
                 $ffprobe = if ($global:VideoTools.FFprobe) { $global:VideoTools.FFprobe } else { 'ffprobe' }
-                $args = @('-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'default=noprint_wrappers=1:nokey=1')
-                if ($FileType -eq 'AviSynth') { $args += '-f', 'avisynth' }
-                $args += $Path
+                $ffargs = @('-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'default=noprint_wrappers=1:nokey=1')
+                if ($FileType -eq 'AviSynth') { $ffargs += '-f', 'avisynth' }
+                $ffargs += $Path
                 
-                $output = & $ffprobe $args 2>&1
+                $output = & $ffprobe $ffargs 2>&1
                 if ($LASTEXITCODE -eq 0 -and $output) {
                     $fps = $output.Trim()
                     if ($fps -match '(\d+)/(\d+)') {
@@ -174,7 +174,7 @@ function Build-MetricFilterGraph {
 
 #region Main Functions
 
-function Get-VideoQualityMetricsX {
+function Get-VideoQualityMetrics3 {
     <#
     .SYNOPSIS
         Рассчитывает метрики качества видео
@@ -249,7 +249,7 @@ function Get-VideoQualityMetricsX {
         [string]$PoolMethod = 'mean',
         
         # SSIMULACRA2 parameters
-        [string]$FFVshipPath = 'R:\ffvship\FFVship.exe',
+        [string]$FFVshipPath = 'X:\Apps\_VideoEncoding\ffmpeg\FFVship.exe',
         [int]$SSIMEvery = 5,
         [int]$SSIMGPUID = 0,
         [int]$SSIMGPUThreads = 3,
@@ -430,13 +430,13 @@ function Get-VideoQualityMetricsX {
             
             # Парсим результаты
             if ($Metrics -contains 'VMAF') {
-                $matches = [regex]::Matches($outputStr, 'VMAF score:\s*(\d+\.\d+)')
-                if ($matches.Count -ge 1) {
-                    $result.VMAF = [double]$matches[0].Groups[1].Value
+                $vmafMatches = [regex]::Matches($outputStr, 'VMAF score:\s*(\d+\.\d+)')
+                if ($vmafMatches.Count -ge 1) {
+                    $result.VMAF = [double]$vmafMatches[0].Groups[1].Value
                     Write-Host "  VMAF: $($result.VMAF)" -ForegroundColor Green
                 }
-                if ($matches.Count -ge 2) {
-                    $result.VMAFNeg = [double]$matches[1].Groups[1].Value
+                if ($vmafMatches.Count -ge 2) {
+                    $result.VMAFNeg = [double]$vmafMatches[1].Groups[1].Value
                     Write-Host "  VMAF (harm): $($result.VMAFNeg)" -ForegroundColor Cyan
                 }
             }
@@ -555,8 +555,8 @@ function Get-VideoQualityMetricsX {
             Write-Host "    VMAF: $($r.VMAF.ToString('F2'))" -ForegroundColor $color 
         }
         if ($r.VMAFNeg) { Write-Host "    VMAF(h): $($r.VMAFNeg.ToString('F2'))" -ForegroundColor Cyan }
-        if ($r.XPSNR) { Write-Host "    XPSNR: $($r.XPSNR.WSUM.ToString('F2'))" -ForegroundColor Gray }
-        if ($r.PSNR) { Write-Host "    PSNR : $($r.PSNR.WSUM.ToString('F2'))" -ForegroundColor Gray }
+        if ($r.XPSNR)   { Write-Host "    XPSNR  : $($r.XPSNR.WSUM.ToString('F2'))" -ForegroundColor Gray }
+        if ($r.PSNR)    { Write-Host "    PSNR   : $($r.PSNR.WSUM.ToString('F2'))" -ForegroundColor Gray }
         if ($r.SSIM) { 
             $ssimVal = if ($r.SSIM -is [double]) { $r.SSIM } else { $r.SSIM.AVG }
             Write-Host "    SSIM : $($ssimVal.ToString('F4'))" -ForegroundColor Gray
@@ -574,10 +574,10 @@ function Get-VideoQualityMetricsX {
 #endregion
 
 # Экспорт функций
-# Export-ModuleMember -Function Get-VideoQualityMetricsX
+Export-ModuleMember -Function Get-VideoQualityMetrics3
 
-
-
+#region Using
+<#
 [PSCustomObject]$CropPrm = @{
     Left          = 0
     Right         = 0
@@ -594,3 +594,4 @@ $dist = @(
 )
 $res = Get-VideoQualityMetricsX -DistortedPaths $dist -ReferencePath $ref -Crop $CropPrm -SubSample 3 -Metrics All # -Metrics Both -TrimStartSeconds 0 -DurationSeconds 10
 #$res | Format-List
+#>

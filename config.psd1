@@ -76,7 +76,8 @@
                 Multi    = "360k"
             }
             AAC = @{
-                Quality = 91 # 91, 100, 109
+                # 0 | 9 | 18 | 27 | 36 | 45 | 54 | 63 | 73 | 82 | 91 | 100 | 109 | 118 | 127
+                Quality = 73
                 ProfileHE = $false
             }
         }
@@ -92,7 +93,7 @@
                     main = @{
                         DisplayName = "x265 Main"
                         CodecCode   = 'hevc'
-                        Quality     = 23
+                        Quality     = 25
                         Preset      = 'slow'
                         BaseArgs    = @(
                             # '--frame-threads', 12,
@@ -139,7 +140,7 @@
                     main = @{
                         DisplayName = "SVT-AV1 Main Preset"
                         CodecCode   = 'av1'
-                        Quality     = 27
+                        Quality     = 35
                         Preset      = 3
                         BaseArgs    = @(
                             '--rc', 0,
@@ -159,11 +160,11 @@
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', 2,
-                            '--scm', 2,
+                            # '--scm', 2,
                             '--enable-qm' ,1,
                             # '--tune', 2,
-                            "--film-grain-denoise", 0,
-                            "--film-grain", 10,
+                            # "--film-grain-denoise", 0,
+                            # "--film-grain", 10,
                             '--color-range', '0'
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
