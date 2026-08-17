@@ -162,32 +162,32 @@
                             '--progress', 2,
                             '--tune', 1,
                             '--enable-qm' ,1,
-                            "--film-grain-denoise", 0,
-                            "--film-grain", 12,
-                            '--color-range', '0'
+                            # "--film-grain-denoise", 0,
+                            # "--film-grain", 10,
+                            '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                            )
+                        )
                     }
 
                     Sugar = @{
-                        DisplayName = "SVT-AV1 Cape Fear"
+                        DisplayName = "SVT-AV1 Sugar"
                         CodecCode   = 'av1'
                         Quality     = 34
                         Preset      = 3
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', 2,
-                            '--tune', 5,
                             '--enable-qm' ,1,
+                            '--tune', 5,
                             "--film-grain-denoise", 0,
-                            "--film-grain", 12,
-                            '--color-range', '0'
+                            "--film-grain", 10,
+                            '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                            )
+                        )
                     }
 
                     grain = @{
@@ -202,11 +202,11 @@
                             # '--tune', 2,
                             "--film-grain-denoise", 0,
                             "--film-grain", 10,
-                            '--color-range', '0'
+                            '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                            )
+                        )
                     }
                 }
                 SvtAv1EncESS = @{
@@ -236,11 +236,11 @@
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', '3',
-                            '--color-range', '0'
+                            '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
                             '--matrix-coefficients', '1'
-                            )
+                        )
                     }
                 }
                 # ============================================
