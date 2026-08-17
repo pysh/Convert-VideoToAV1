@@ -242,15 +242,15 @@ function Get-VideoQualityMetrics3 {
 
         [string]$ModelVersion = 'vmaf_4k_v0.6.1',
         [int]$Threads = [Environment]::ProcessorCount,
-        [int]$Subsample = 1,
+        [int]$Subsample = 3,
         [string]$LogPath,
 
         [ValidateSet('mean', 'harmonic_mean')]
         [string]$PoolMethod = 'mean',
         
         # SSIMULACRA2 parameters
-        [string]$FFVshipPath = 'X:\Apps\_VideoEncoding\ffmpeg\FFVship.exe',
-        [int]$SSIMEvery = 5,
+        [string]$FFVshipPath = 'FFVship.exe',
+        [int]$SSIMEvery = 1,
         [int]$SSIMGPUID = 0,
         [int]$SSIMGPUThreads = 3,
         [switch]$SSIMCacheIndex
@@ -262,7 +262,7 @@ function Get-VideoQualityMetrics3 {
     
     # Проверяем наличие SSIMULACRA2
     $useSSIM = $Metrics -contains 'SSIMULACRA2'
-    if ($useSSIM -and -not (Test-Path -LiteralPath $FFVshipPath)) {
+    if ($useSSIM -and -not (Get-Command -Name $FFVshipPath)) {
         Write-Warning "FFVship.exe не найден: ${FFVshipPath}. SSIMULACRA2 будет пропущен."
         $Metrics = $Metrics | Where-Object { $_ -ne 'SSIMULACRA2' }
         $useSSIM = $false
@@ -513,13 +513,13 @@ function Get-VideoQualityMetrics3 {
                 $outStr = $output -join "`n"
                 $ssimData = @{}
                 
-                if ($outStr -match 'Average\s*:\s*([\d.]+)') { $ssimData['Average'] = [double]$Matches[1] }
-                if ($outStr -match 'Standard Deviation\s*:\s*([\d.]+)') { $ssimData['StdDev'] = [double]$Matches[1] }
-                if ($outStr -match 'Median\s*:\s*([\d.]+)') { $ssimData['Median'] = [double]$Matches[1] }
-                if ($outStr -match '5th percentile\s*:\s*([\d.]+)') { $ssimData['P5'] = [double]$Matches[1] }
-                if ($outStr -match '95th percentile\s*:\s*([\d.]+)') { $ssimData['P95'] = [double]$Matches[1] }
-                if ($outStr -match 'Minimum\s*:\s*([\d.]+)') { $ssimData['Min'] = [double]$Matches[1] }
-                if ($outStr -match 'Maximum\s*:\s*([\d.]+)') { $ssimData['Max'] = [double]$Matches[1] }
+                if ($outStr -match 'Average\s*:\s*(-?[\d.]+)') { $ssimData['Average'] = [double]$Matches[1] }
+                if ($outStr -match 'Standard Deviation\s*:\s*(-?[\d.]+)') { $ssimData['StdDev'] = [double]$Matches[1] }
+                if ($outStr -match 'Median\s*:\s*(-?[\d.]+)') { $ssimData['Median'] = [double]$Matches[1] }
+                if ($outStr -match '5th percentile\s*:\s*(-?[\d.]+)') { $ssimData['P5'] = [double]$Matches[1] }
+                if ($outStr -match '95th percentile\s*:\s*(-?[\d.]+)') { $ssimData['P95'] = [double]$Matches[1] }
+                if ($outStr -match 'Minimum\s*:\s*(-?[\d.]+)') { $ssimData['Min'] = [double]$Matches[1] }
+                if ($outStr -match 'Maximum\s*:\s*(-?[\d.]+)') { $ssimData['Max'] = [double]$Matches[1] }
                 if ($outStr -match 'Computed (\d+) frames') { $ssimData['Frames'] = [int]$Matches[1] }
                 
                 if ($ssimData.Count -gt 0) {
@@ -577,7 +577,7 @@ function Get-VideoQualityMetrics3 {
 Export-ModuleMember -Function Get-VideoQualityMetrics3
 
 #region Using
-<#
+<# 
 [PSCustomObject]$CropPrm = @{
     Left          = 0
     Right         = 0
@@ -585,13 +585,24 @@ Export-ModuleMember -Function Get-VideoQualityMetrics3
     Bottom        = 0
     CropDistVideo = $false
 }
-$ref = 'r:\Temp\e16.mkv'
+$ref = 'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_sample.mkv'
 $dist = @(
-'r:\Temp\UM_s06e16_[hevc_crf25].mkv'
-'r:\Temp\UM_s06e16_[hevc_crf24].mkv'
-'r:\Temp\UM_s06e16_[hevc_crf23].mkv'
-'r:\Temp\e16_[av1an_x265-crf95].mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_[MS_SIM]_SvtAv1_crf=30_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_[MS_SIM]_SvtAv1_crf=32_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_[VMAF]_SvtAv1_crf=30_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_[VMAF]_SvtAv1_crf=32_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_[VQ]_SvtAv1_crf=30_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_[VQ]_SvtAv1_crf=32_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_no-qm_SvtAv1_crf=30_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_no-qm_SvtAv1_crf=32_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_SvtAv1_crf=26_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_SvtAv1_crf=28_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_SvtAv1_crf=30_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_SvtAv1_crf=32_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_SvtAv1_crf=34_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_SvtAv1_crf=36_preset=4.mkv'
+'r:\Temp\I.Will.Find.You.S01E01.2160p.NF.WEB-DL.SDR.4xRus.Ukr.Eng.Subs-alekartem_EncodingTests\SDR_SvtAv1_crf=38_preset=4.mkv'
 )
-$res = Get-VideoQualityMetricsX -DistortedPaths $dist -ReferencePath $ref -Crop $CropPrm -SubSample 3 -Metrics All # -Metrics Both -TrimStartSeconds 0 -DurationSeconds 10
-#$res | Format-List
+$res = Get-VideoQualityMetrics3 -DistortedPaths $dist -ReferencePath $ref -Metrics SSIMULACRA2 -Subsample 3 -SSIMEvery 3 -SSIMGPUThreads 2 -Threads 4
+$res | Format-List
 #>

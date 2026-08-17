@@ -134,26 +134,20 @@ function ConvertTo-Seconds {
         [double]$FrameRate
     )
     
-    try {
-        if ($TimeString -match '^(\d+):(\d+):(\d+)(?:\.(\d+))?$') {
-            $hours = [int]$Matches[1]
-            $minutes = [int]$Matches[2]
-            $seconds = [int]$Matches[3]
-            $milliseconds = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
-            return $hours * 3600 + $minutes * 60 + $seconds + ($milliseconds / 1000)
-        }
-        elseif ($TimeString -match '^(\d+)(?:\.(\d+))?s$') {
-            $seconds = [int]$Matches[1]
-            $milliseconds = if ($Matches[2]) { [int]$Matches[2] } else { 0 }
-            return $seconds + ($milliseconds / 1000)
-        }
-        
-        throw "Неверный формат времени: $TimeString"
+    if ($TimeString -match '^(\d+):(\d+):(\d+)(?:\.(\d+))?$') {
+        $ms = if ($Matches[4]) { [double]$Matches[4] } else { 0 }
+        return [double]$Matches[1] * 3600 + [double]$Matches[2] * 60 + [double]$Matches[3] + ($ms / 1000)
     }
-    catch {
-        Write-Log "Ошибка конвертации времени: $_" -Severity Error -Category 'Video'
-        throw
+    elseif ($TimeString -match '^(\d+)(?:\.(\d+))?s$') {
+        $ms = if ($Matches[2]) { [double]$Matches[2] } else { 0 }
+        return [double]$Matches[1] + ($ms / 1000)
     }
+    elseif ($FrameRate -and $TimeString -match '^(\d+)f$') {
+        # Конвертация количества кадров в секунды (исправлена логика: кадры / FPS)
+        return [double]$Matches[1] / $FrameRate
+    }
+
+    throw "Неверный формат времени: $TimeString"
 }
 
 function Write-Log {
@@ -171,27 +165,23 @@ function Write-Log {
     )
 
     $timestamp = [DateTime]::Now.ToString("yyyy-MM-dd HH:mm:ss.fff")
-    $logSeverity = switch ($Severity) {
-        'Success' { 'OK!' }
-        'Debug' { 'DBG' }
-        'Information' { 'INF' }
-        'Verbose' { 'VRB' }
-        'Warning' { 'WRN' }
-        'Error' { 'ERR' }
-        default { '---' }
+
+    # Единая таблица маппинга для сокращений и цветов (O(1) lookup вместо двух switch)
+    $SeverityConfig = @{
+        'Success'     = @{ Abbrev = 'OK!'; Color = 'Green' }
+        'Debug'       = @{ Abbrev = 'DBG'; Color = 'DarkGray' }
+        'Information' = @{ Abbrev = 'INF'; Color = 'Cyan' }
+        'Verbose'     = @{ Abbrev = 'VRB'; Color = 'DarkYellow' }
+        'Warning'     = @{ Abbrev = 'WRN'; Color = 'DarkMagenta' }
+        'Error'       = @{ Abbrev = 'ERR'; Color = 'Red' }
     }
-    
-    $color = switch ($Severity) {
-        'Success' { 'Green' }
-        'Debug' { 'DarkGray' }
-        'Information' { 'Cyan' }
-        'Verbose' { 'DarkYellow' }
-        'Warning' { 'DarkMagenta' }
-        'Error' { 'Red' }
-        default { 'White' }
-    }
-    
-    $logMessage = "[$timestamp] [$logSeverity]$(if($Category){ " [$Category]" })`t$Message"
+
+    $config = $SeverityConfig[$Severity]
+    $logSeverity = $config.Abbrev
+    $color = $config.Color
+
+    $categoryStr = if ($Category) { " [$Category]" } else { '' }
+    $logMessage = "[$timestamp] [$logSeverity]$categoryStr`t$Message"
     Write-Host $logMessage -ForegroundColor $color -NoNewline:$NoNewLine
 }
 

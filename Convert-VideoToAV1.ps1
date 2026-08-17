@@ -54,7 +54,10 @@ param(
     [switch]$ListEncoders,
     
     [Parameter(Mandatory = $false)]
-    [switch]$KeepTempFiles
+    [switch]$KeepTempFiles,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipMetrics
 )
 
 begin {
@@ -75,7 +78,8 @@ begin {
         'NfoProcessor.psm1',
         'AudioProcessor.psm1',
         'VideoProcessor.psm1',
-        'MuxProcessor.psm1'
+        'MuxProcessor.psm1',
+        'QualityMetrics.psm1'
     )
     
     foreach ($module in $requiredModules) {
@@ -157,7 +161,7 @@ process {
             $_.Extension.ToLower() -in $supportedFormats -and
             $_.Name -notmatch '_out\.mkv$' -and
             ($_.Name -match $InputFilter -or -not $InputFilter)
-        }
+        } | Sort-Object $_.FullName -Descending
         
         if (-not $videoFiles) {
             Write-Log "No video files found in: $InputDirectory" -Severity Warning -Category 'Main'
@@ -214,26 +218,38 @@ process {
                 }
                 
                 # 1. ДЕМУКС - извлечение всех потоков
-                Write-Log "`n[1/5] DEMUX" -Severity Information -Category 'Main'
+                Write-Log "`n[1/6] DEMUX" -Severity Information -Category 'Main'
                 $job = Invoke-Demux -Job $job
                 
                 # Получение FrameRate для обрезки
                 $job.FrameRate = Get-VideoFrameRate -VideoPath $job.VideoSource
                 
                 # 2. ОБРАБОТКА NFO
-                Write-Log "`n[2/5] METADATA" -Severity Information -Category 'Main'
+                Write-Log "`n[2/6] METADATA" -Severity Information -Category 'Main'
                 $job = Invoke-NfoProcessing -Job $job
                 
                 # 3. ОБРАБОТКА АУДИО
-                Write-Log "`n[3/5] AUDIO" -Severity Information -Category 'Main'
+                Write-Log "`n[3/6] AUDIO" -Severity Information -Category 'Main'
                 $job = ConvertTo-Audio -Job $job
                 
                 # 4. ОБРАБОТКА ВИДЕО
-                Write-Log "`n[4/5] VIDEO" -Severity Information -Category 'Main'
+                Write-Log "`n[4/6] VIDEO" -Severity Information -Category 'Main'
                 $job = ConvertTo-Video -Job $job -TemplatePath $CustomTemplatePath
                 
-                # 5. СБОРКА ФИНАЛЬНОГО ФАЙЛА
-                Write-Log "`n[5/5] MUX" -Severity Information -Category 'Main'
+                # 5. РАСЧЕТ МЕТРИК
+                if (-not $SkipMetrics) {
+                    Write-Log "`n[5/6] CALCULATE METRICS (Crop parameters: $($job.CropParameters)" -Severity Information -Category 'Main'
+                    $metrics =Get-VideoQualityMetrics3 `
+                        -ReferencePath $job.VideoSource -DistortedPaths $job.VideoEncoded `
+                        -Metrics VMAF,SSIMULACRA2  `
+                        -Crop $job.CropParameters `
+                        -Subsample 9
+                    $job.Metrics = $metrics
+                Write-Log $metrics -Severity Information -Category 'Main'
+                }
+
+                # 6. СБОРКА ФИНАЛЬНОГО ФАЙЛА
+                Write-Log "`n[6/6] MUXING" -Severity Information -Category 'Main'
                 
                 # Формирование имени выходного файла
                 $encoderCode = Get-EncoderCode -EncoderName $job.EncoderName

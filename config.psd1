@@ -15,7 +15,7 @@
         SvtAv1EncTritium = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-Tritium\SvtAv1EncApp.exe'
         Rav1eEnc       = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\rav1e\rav1e.exe'
         AomAv1Enc      = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\AOMEnc\aomenc.exe'
-        OpusEnc        = 'd:\Sources\media-autobuild_suite\local64\bin-audio\opusenc.exe'
+        OpusEnc        = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Audio\opus\opusenc.exe'
         QAAC           = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Audio\qaac\qaac64.exe'
         AutoCrop       = '.\Tools\AutoCrop.exe'
     }
@@ -152,19 +152,37 @@
                             '--matrix-coefficients', 1
                         )
                     }
-                    FAM = @{
-                        DisplayName = "SVT-AV1 Grain"
+                    CapeFear = @{
+                        DisplayName = "SVT-AV1 Cape Fear"
                         CodecCode   = 'av1'
-                        Quality     = 41
-                        Preset      = 4
+                        Quality     = 33
+                        Preset      = 3
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', 2,
-                            # '--scm', 2,
+                            '--tune', 1,
                             '--enable-qm' ,1,
-                            # '--tune', 2,
-                            # "--film-grain-denoise", 0,
-                            # "--film-grain", 10,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 12,
+                            '--color-range', '0'
+                            '--color-primaries', '1',
+                            '--transfer-characteristics', '1',
+                            '--matrix-coefficients', '1'
+                            )
+                    }
+
+                    Sugar = @{
+                        DisplayName = "SVT-AV1 Cape Fear"
+                        CodecCode   = 'av1'
+                        Quality     = 34
+                        Preset      = 3
+                        BaseArgs    = @(
+                            '--rc', '0',
+                            '--progress', 2,
+                            '--tune', 5,
+                            '--enable-qm' ,1,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 12,
                             '--color-range', '0'
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
