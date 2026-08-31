@@ -161,7 +161,7 @@ process {
             $_.Extension.ToLower() -in $supportedFormats -and
             $_.Name -notmatch '_out\.mkv$' -and
             ($_.Name -match $InputFilter -or -not $InputFilter)
-        } | Sort-Object $_.FullName -Descending
+        } | Sort-Object $_.FullName
         
         if (-not $videoFiles) {
             Write-Log "No video files found in: $InputDirectory" -Severity Warning -Category 'Main'

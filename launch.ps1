@@ -1,9 +1,9 @@
 param(
-    [string]$InputDir = 'g:\Видео\Сериалы\Зарубежные\Шугар (Sugar)\Sugar (Season 2) DV HDR10 WEB-DL 2160p\',
-    [string]$Encoder  = "SvtAv1Enc.Sugar",
-    [string]$InputFilter = 'S02E01' ,#'^(?!.*S01E10).*$',
+    [string]$InputDir = 'g:\Видео\Сериалы\Зарубежные\Рассказы из петли (Tales from the Loop)\Tales.From.The.Loop.S01.HDR.2160p.Rutracker\',
+    [string]$Encoder  = "SvtAv1Enc.TalesFromTheLoop",
+    [string]$InputFilter = 'S01E01' ,#'^(?!.*S01E10).*$',
     [PSCustomObject]$CropParameters, # = @{Left=0;Top=120;Right=0;Bottom=120},
-    [string]$CustomTemplatePath,
+    [string]$CustomTemplatePath='g:\Видео\Сериалы\Зарубежные\Рассказы из петли (Tales from the Loop)\Tales.From.The.Loop.S01.HDR.2160p.Rutracker\template.avs',
     [string]$TempDirectory,
     [switch]$CopyAudio,
     [switch]$CopyVideo,

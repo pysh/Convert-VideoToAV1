@@ -1,56 +1,64 @@
 @{
     # Пути к инструментам
-    Tools = @{
-        FFmpeg         = "ffmpeg.exe"
-        FFprobe        = "ffprobe.exe"
-        MkvMerge       = "mkvmerge.exe"
-        MkvExtract     = "mkvextract.exe"
-        MkvPropedit    = "mkvpropedit.exe"
-        VSPipe         = "c:\Python313\Lib\site-packages\vapoursynth\vspipe.exe"
-        x265           = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\x265\x265.exe'
-        SvtAv1Enc      = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp\SvtAv1EncApp.exe'
-        SvtAv1EncESS   = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-Essential\SvtAv1EncApp.exe'
-        SvtAv1EncHDR   = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-HDR\SvtAv1EncApp.exe'
-        SvtAv1EncPSYEX = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-PSYEX\SvtAv1EncApp.exe'
+    Tools             = @{
+        FFmpeg           = "ffmpeg.exe"
+        FFprobe          = "ffprobe.exe"
+        MkvMerge         = "mkvmerge.exe"
+        MkvExtract       = "mkvextract.exe"
+        MkvPropedit      = "mkvpropedit.exe"
+        Avs2PipeMod      = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Support\avs2pipemod\avs2pipemod64.exe'
+        VSPipe           = "c:\Python313\Lib\site-packages\vapoursynth\vspipe.exe"
+        x265             = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\x265\x265.exe'
+        SvtAv1Enc        = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp\SvtAv1EncApp.exe'
+        SvtAv1EncESS     = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-Essential\SvtAv1EncApp.exe'
+        SvtAv1EncHDR     = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-HDR\SvtAv1EncApp.exe'
+        SvtAv1EncPSYEX   = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-PSYEX\SvtAv1EncApp.exe'
         SvtAv1EncTritium = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\SvtAv1EncApp-Tritium\SvtAv1EncApp.exe'
-        Rav1eEnc       = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\rav1e\rav1e.exe'
-        AomAv1Enc      = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\AOMEnc\aomenc.exe'
-        OpusEnc        = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Audio\opus\opusenc.exe'
-        QAAC           = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Audio\qaac\qaac64.exe'
-        AutoCrop       = '.\Tools\AutoCrop.exe'
+        Rav1eEnc         = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\rav1e\rav1e.exe'
+        AomAv1Enc        = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Encoders\AOMEnc\aomenc.exe'
+        OpusEnc          = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Audio\opus\opusenc.exe'
+        QAAC             = 'X:\Apps\_VideoEncoding\StaxRip\Apps\Audio\qaac\qaac64.exe'
+        AutoCrop         = '.\Tools\AutoCrop.exe'
     }
     
     # Пути к шаблонам VapourSynth
-    Templates = @{
+    Templates         = @{
         VapourSynth = @{
             AutoCrop       = ".\Templates\AutoCropTemplate.py"
             MainScript     = ".\Templates\VapourSynth\universal_v2.vpy"
             MainHDScript   = ".\Templates\VapourSynth\MainHDScript+.vpy"
             HDRtoSDRScript = ".\Templates\VapourSynth\universal_v2.vpy"
         }
+        AviSynth    = @{
+            MainScript     = '.\Templates\Main.avs'
+            MainHDScript   = '.\Templates\MainHD.avs'
+            HDRtoSDRScript = '.\Templates\HDRtoSDR.avs'
+        }
     }
     
     # Пути по умолчанию
-    Paths = @{
+    Paths             = @{
         DefaultInputDirectory = "G:\Видео\"
-        TempDirectory = "R:\.temp\"
+        TempDirectory         = "R:\.temp\"
     }
     
     # Параметры обработки
-    Processing = @{
+    Processing        = @{
         DeleteTempFiles    = $true
         AutoCropThreshold  = 1000
         VSPipeMethod       = "vspipe"  # vspipe или ffmpeg
         CalculateVMAF      = $false
+        AviSynthPipeMethod = 'avs2pipemod'
+        #ScriptEngine       = 'AviSynth'
     }
     
     # Коды энкодеров для имен файлов
-    EncoderCodes = @{
-        x265           = 'hevc'
-        SvtAv1Enc      = 'av1'
-        SvtAv1EncESS   = 'av1'
-        Rav1eEnc       = 'av1'
-        AomAv1Enc      = 'av1'
+    EncoderCodes      = @{
+        x265         = 'hevc'
+        SvtAv1Enc    = 'av1'
+        SvtAv1EncESS = 'av1'
+        Rav1eEnc     = 'av1'
+        AomAv1Enc    = 'av1'
     }
     
     # Доступные энкодеры
@@ -63,34 +71,34 @@
     }
     
     # Энкодер по умолчанию
-    DefaultEncoder = 'SvtAv1Enc.grain'
+    DefaultEncoder    = 'SvtAv1Enc.grain'
     
     # Настройки аудио
-    Encoding = @{
+    Encoding          = @{
         Audio = @{
             CopyAudio = $false
-            Codec = 'opus'
-            Bitrates = @{
+            Codec     = 'opus'
+            Bitrates  = @{
                 Stereo   = "144k"
                 Surround = "300k"
                 Multi    = "360k"
             }
-            AAC = @{
+            AAC       = @{
                 # 0 | 9 | 18 | 27 | 36 | 45 | 54 | 63 | 73 | 82 | 91 | 100 | 109 | 118 | 127
-                Quality = 73
+                Quality   = 73
                 ProfileHE = $false
             }
         }
         
         Video = @{
-            CopyVideo = $false
-            CropRound = 2
-            XtraParams = @()
+            CopyVideo      = $false
+            CropRound      = 2
+            XtraParams     = @()
             
             # Пресеты энкодеров
             EncoderPresets = @{
-                x265 = @{
-                    main = @{
+                x265         = @{
+                    main  = @{
                         DisplayName = "x265 Main"
                         CodecCode   = 'hevc'
                         Quality     = 25
@@ -136,8 +144,8 @@
                         )
                     }
                 }
-                SvtAv1Enc = @{
-                    main = @{
+                SvtAv1Enc    = @{
+                    main             = @{
                         DisplayName = "SVT-AV1 Main Preset"
                         CodecCode   = 'av1'
                         Quality     = 35
@@ -145,14 +153,14 @@
                         BaseArgs    = @(
                             '--rc', 0,
                             '--progress', 2,
-                            '--enable-qm' ,1,
+                            '--enable-qm' , 1,
                             '--color-range', 0,
                             '--color-primaries', 1,
                             '--transfer-characteristics', 1,
                             '--matrix-coefficients', 1
                         )
                     }
-                    CapeFear = @{
+                    CapeFear         = @{
                         DisplayName = "SVT-AV1 Cape Fear"
                         CodecCode   = 'av1'
                         Quality     = 33
@@ -161,7 +169,7 @@
                             '--rc', '0',
                             '--progress', 2,
                             '--tune', 1,
-                            '--enable-qm' ,1,
+                            '--enable-qm' , 1,
                             # "--film-grain-denoise", 0,
                             # "--film-grain", 10,
                             '--color-range', '0',
@@ -171,7 +179,7 @@
                         )
                     }
 
-                    Sugar = @{
+                    Sugar            = @{
                         DisplayName = "SVT-AV1 Sugar"
                         CodecCode   = 'av1'
                         Quality     = 34
@@ -179,7 +187,7 @@
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', 2,
-                            '--enable-qm' ,1,
+                            '--enable-qm' , 1,
                             '--tune', 5,
                             "--film-grain-denoise", 0,
                             "--film-grain", 10,
@@ -190,7 +198,47 @@
                         )
                     }
 
-                    grain = @{
+                    TalesFromTheLoop = @{
+                        DisplayName = "SVT-AV1 Tales.From.The.Loop"
+                        CodecCode   = 'av1'
+                        Quality     = 30
+                        Preset      = 3
+                        BaseArgs    = @(
+                            '--rc', '0',
+                            '--lp', 5,
+                            '--progress', 2,
+                            '--enable-qm' , 1,
+                            '--tune', 5,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 12,
+                            '--color-range', '0',
+                            '--color-primaries', '1',
+                            '--transfer-characteristics', '1',
+                            '--matrix-coefficients', '1'
+                        )
+                    }
+
+                    DetHole          = @{
+                        DisplayName = "SVT-AV1"
+                        CodecCode   = 'av1'
+                        Quality     = 27
+                        Preset      = 3
+                        BaseArgs    = @(
+                            '--rc', '0',
+                            '--lp', 5,
+                            '--progress', 2,
+                            '--enable-qm' , 1,
+                            '--tune', 5,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 12,
+                            '--color-range', '0',
+                            '--color-primaries', '1',
+                            '--transfer-characteristics', '1',
+                            '--matrix-coefficients', '1'
+                        )
+                    }
+
+                    grain            = @{
                         DisplayName = "SVT-AV1 Grain"
                         CodecCode   = 'av1'
                         Quality     = 27
@@ -198,7 +246,7 @@
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', 2,
-                            '--enable-qm' ,1,
+                            '--enable-qm' , 1,
                             # '--tune', 2,
                             "--film-grain-denoise", 0,
                             "--film-grain", 10,
@@ -228,7 +276,7 @@
                             '--matrix-coefficients', 1
                         )
                     }
-                    main = @{
+                    main  = @{
                         DisplayName = "SVT-AV1 Main"
                         CodecCode   = 'av1'
                         Quality     = 'medium'
@@ -246,7 +294,7 @@
                 # ============================================
                 # ДРУГИЕ AV1 ЭНКОДЕРЫ
                 # ============================================
-                Rav1eEnc = @{
+                Rav1eEnc     = @{
                     main = @{
                         DisplayName = "Rav1e Main Preset"
                         CodecCode   = 'av1'
@@ -264,7 +312,7 @@
                     }
                 }
                 
-                AomAv1Enc = @{
+                AomAv1Enc    = @{
                     main = @{
                         DisplayName = "AOM AV1 Main"
                         CodecCode   = 'av1'
