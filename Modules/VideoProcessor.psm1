@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
     Обрабатывает видео (кодирование или копирование)
+    Поддерживает VapourSynth (.vpy) и AviSynth (.avs) фреймсерверы
 #>
 
 function ConvertTo-Video {
@@ -29,15 +30,24 @@ function ConvertTo-Video {
     $extension = if ($isAV1) { 'ivf' } elseif ($isHEVC) { 'hevc' } else { 'h264' }
     $Job.VideoEncoded = Join-Path $Job.WorkingDir "encoded_video.$extension"
     
-    # Создание VapourSynth скрипта
-    $Job.ScriptFile = Join-Path $Job.WorkingDir "$($Job.BaseName).vpy"
-    $Job.CacheFile = Join-Path $Job.WorkingDir "$($Job.BaseName).lwi"
+    # Определение движка скриптов из конфигурации
+    $scriptEngine = $global:Config.Processing.ScriptEngine ?? 'VapourSynth'
+    $Job.ScriptEngine = $scriptEngine
+    
+    # Создание скрипта в зависимости от движка
+    if ($scriptEngine -eq 'AviSynth') {
+        $Job.ScriptFile = Join-Path $Job.WorkingDir "$($Job.BaseName).avs"
+        $Job.CacheFile = Join-Path $Job.WorkingDir "$($Job.BaseName).dgi"
+    } else {
+        $Job.ScriptFile = Join-Path $Job.WorkingDir "$($Job.BaseName).vpy"
+        $Job.CacheFile = Join-Path $Job.WorkingDir "$($Job.BaseName).lwi"
+    }
     
     # Выбор шаблона
     $selectedTemplate = Select-Template -Job $Job -CustomPath $TemplatePath
     
     # Создание скрипта
-    $scriptContent = New-VapourSynthScript -Job $Job -TemplatePath $selectedTemplate
+    $scriptContent = New-VideoScript -Job $Job -TemplatePath $selectedTemplate -Engine $scriptEngine
     Set-Content -LiteralPath $Job.ScriptFile -Value $scriptContent -Force -Encoding UTF8
     $Job.TempFiles.Add($Job.ScriptFile)
     $Job.TempFiles.Add($Job.CacheFile)
@@ -50,27 +60,27 @@ function ConvertTo-Video {
     # ПОЛУЧАЕМ ИНФОРМАЦИЮ О СКРИПТЕ ДО КОДИРОВАНИЯ
     # ============================================
     try {
-        $vpyInfo = Get-VideoScriptInfo -ScriptPath $Job.ScriptFile
-        $Job.VPYInfo = $vpyInfo
-        Write-Log "Информация о VapourSynth скрипте: $($vpyInfo.Frames) кадров, FPS: $($vpyInfo.FPS)" -Severity Information -Category 'Video'
+        $scriptInfo = Get-VideoScriptInfo -ScriptPath $Job.ScriptFile -Engine $scriptEngine
+        $Job.ScriptInfo = $scriptInfo
+        Write-Log "Информация о $scriptEngine скрипте: $($scriptInfo.Frames) кадров, FPS: $($scriptInfo.FPS)" -Severity Information -Category 'Video'
     }
     catch {
-        Write-Log "Не удалось получить информацию о VapourSynth скрипте: $_" -Severity Warning -Category 'Video'
-        $Job.VPYInfo = $null
+        Write-Log "Не удалось получить информацию о $scriptEngine скрипте: $_" -Severity Warning -Category 'Video'
+        $Job.ScriptInfo = $null
     }
     
     # Запуск кодирования
     Invoke-Encoder -Job $Job
     
     # Проверка количества кадров (если есть информация для сравнения)
-    if ($Job.VPYInfo -and $Job.VPYInfo.Frames -gt 0) {
+    if ($Job.ScriptInfo -and $Job.ScriptInfo.Frames -gt 0) {
         try {
             $encodedInfo = Get-VideoStats -VideoFilePath $Job.VideoEncoded
-            if ($encodedInfo.FrameCount -ne $Job.VPYInfo.Frames) {
-                Write-Log "Предупреждение: несоответствие кадров (скрипт: $($Job.VPYInfo.Frames), видео: $($encodedInfo.FrameCount))" `
+            if ($encodedInfo.FrameCount -ne $Job.ScriptInfo.Frames) {
+                Write-Log "Предупреждение: несоответствие кадров (скрипт: $($Job.ScriptInfo.Frames), видео: $($encodedInfo.FrameCount))" `
                     -Severity Warning -Category 'Video'
             } else {
-                Write-Log "Проверка кадров: OK ($($Job.VPYInfo.Frames) кадров)" -Severity Success -Category 'Video'
+                Write-Log "Проверка кадров: OK ($($Job.ScriptInfo.Frames) кадров)" -Severity Success -Category 'Video'
             }
         }
         catch {
@@ -94,7 +104,12 @@ function Select-Template {
     }
     
     $videoDir = [IO.Path]::GetDirectoryName($Job.VideoSource)
-    $localTemplate = Join-Path $videoDir 'template.vpy'
+    
+    # Определение движка и имени локального шаблона
+    $scriptEngine = $Job.ScriptEngine ?? 'VapourSynth'
+    $localTemplateName = if ($scriptEngine -eq 'AviSynth') { 'template.avs' } else { 'template.vpy' }
+    $localTemplate = Join-Path $videoDir $localTemplateName
+    
     if (Test-Path -LiteralPath $localTemplate) {
         Write-Log "Использование локального шаблона: $localTemplate" -Severity Information -Category 'Video'
         return $localTemplate
@@ -107,7 +122,14 @@ function Select-Template {
                     elseif ($isHEVC) { 'MainHDScript' }
                     else { 'MainScript' }
     
-    $relativePath = $global:Config.Templates.VapourSynth[$templateName]
+    # Выбор секции конфигурации в зависимости от движка
+    $templateSection = if ($scriptEngine -eq 'AviSynth') { 'AviSynth' } else { 'VapourSynth' }
+    $relativePath = $global:Config.Templates.$templateSection[$templateName]
+    
+    if (-not $relativePath) {
+        throw "Template path not found in config for $templateName ($templateSection)"
+    }
+    
     $scriptDir = Split-Path -Parent $PSScriptRoot
     $templatePath = Join-Path $scriptDir $relativePath
     
@@ -115,13 +137,18 @@ function Select-Template {
         throw "Template not found: $templatePath"
     }
     
-    Write-Log "Использование шаблона: $templateName" -Severity Information -Category 'Video'
+    Write-Log "Использование шаблона: $templateName ($templateSection)" -Severity Information -Category 'Video'
     return $templatePath
 }
 
-function New-VapourSynthScript {
+function New-VideoScript {
     [CmdletBinding()]
-    param([hashtable]$Job, [string]$TemplatePath)
+    param(
+        [hashtable]$Job, 
+        [string]$TemplatePath,
+        [ValidateSet('VapourSynth', 'AviSynth')]
+        [string]$Engine = 'VapourSynth'
+    )
     
     $templateContent = Get-Content -LiteralPath $TemplatePath -Raw -Encoding UTF8
     
@@ -135,17 +162,26 @@ function New-VapourSynthScript {
         $cropLeft = $cropRight = $cropTop = $cropBottom = 0
     }
     
-    # Тримминг
+    # Тримминг - разный синтаксис для разных движков
     $trimScript = ''
     if ($Job.TrimStartSeconds -gt 0) {
         $startFrame = [math]::Round($Job.TrimStartSeconds * $Job.FrameRate)
-        $trimScript = "clip = clip[${startFrame}:]`n"
+        if ($Engine -eq 'AviSynth') {
+            $trimScript = "Trim($startFrame, last)`n"
+        } else {
+            $trimScript = "clip = clip[${startFrame}:]`n"
+        }
     }
     if ($Job.TrimDurationSeconds -gt 0) {
         $endFrame = [math]::Round(($Job.TrimStartSeconds + $Job.TrimDurationSeconds) * $Job.FrameRate)
-        $trimScript = "clip = clip[:${endFrame}]`n"
+        if ($Engine -eq 'AviSynth') {
+            $trimScript = "Trim(0, $endFrame)`n"
+        } else {
+            $trimScript = "clip = clip[:${endFrame}]`n"
+        }
     }
     
+    # Формирование замен в зависимости от движка
     $replacements = @{
         '{VideoPath}' = $Job.VideoSource.Replace('\', '/')
         '{CacheFile}' = $Job.CacheFile.Replace('\', '/')
@@ -168,11 +204,21 @@ function Invoke-Encoder {
     param([hashtable]$Job)
     
     $isHEVC = $Job.EncoderName -match 'x265'
+    $scriptEngine = $Job.ScriptEngine ?? 'VapourSynth'
+    
+    # Определение метода pipe в зависимости от движка
+    if ($scriptEngine -eq 'AviSynth') {
+        $pipeMethod = $global:Config.Processing.AviSynthPipeMethod ?? 'avs2pipemod'
+        $pipeTool = $global:VideoTools.Avs2PipeMod ?? 'avs2pipemod64.exe'
+    } else {
+        $pipeMethod = $global:Config.Processing.VSPipeMethod ?? 'vspipe'
+        $pipeTool = $global:VideoTools.VSPipe
+    }
     
     if ($isHEVC) {
         $supportsVpy = $false # Test-X265VpySupport -X265Path $Job.EncoderPath
         
-        if ($supportsVpy) {
+        if ($supportsVpy -and $scriptEngine -eq 'VapourSynth') {
             $encArgs = @(
                 '--reader-options', 'library=X:\Apps\_VideoEncoding\StaxRip\Apps\FrameServer\VapourSynth\VSScript.dll'
                 '--input', $Job.ScriptFile, '--output', $Job.VideoEncoded
@@ -186,37 +232,49 @@ function Invoke-Encoder {
 
             & $Job.EncoderPath $encArgs
         } else {
-            Write-Log "Запуск x265 через vspipe" -Severity Verbose -Category 'Video'
-            $vspipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
+            # Запуск через pipe (vspipe или avs2pipemod)
+            Write-Log "Запуск x265 через $pipeMethod" -Severity Verbose -Category 'Video'
+            
+            if ($scriptEngine -eq 'AviSynth') {
+                # AviSynth через avs2pipemod
+                $pipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
+            } else {
+                # VapourSynth через vspipe
+                $pipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
+            }
+            
             $encArgs = @(
                 '--y4m',
                 '--output', $Job.VideoEncoded
                 '--input', '-'
                 ) + $Job.EncoderParams
 
-            $cmd="$($global:VideoTools.VSPipe) $($vspipeArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
+            $cmd="$pipeTool $($pipeArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
             Write-Log $cmd -Severity Verbose -Category 'Video'
             $Job.CommandLines+=@{'EncodeVideo'=$cmd}
 
-            & $global:VideoTools.VSPipe $vspipeArgs | & $Job.EncoderPath $encArgs
+            & $pipeTool $pipeArgs | & $Job.EncoderPath $encArgs
         }
     } else {
-        $vspipeMethod = $global:Config.Processing.VSPipeMethod ?? 'vspipe'
-        
+        # AV1 и другие энкодеры
         # Формируем аргументы энкодера
         $encArgs = @('--output', $Job.VideoEncoded, '--input', '-') + $Job.EncoderParams
         
         # Добавляем параметр --frames, если известен
-        if ($Job.VPYInfo -and $Job.VPYInfo.Frames -gt 0) {
-            $encArgs = @('--frames', $Job.VPYInfo.Frames) + $encArgs
-            Write-Log "Установлено ограничение кадров: $($Job.VPYInfo.Frames)" -Severity Verbose -Category 'Video'
+        if ($Job.ScriptInfo -and $Job.ScriptInfo.Frames -gt 0) {
+            $encArgs = @('--frames', $Job.ScriptInfo.Frames) + $encArgs
+            Write-Log "Установлено ограничение кадров: $($Job.ScriptInfo.Frames)" -Severity Verbose -Category 'Video'
         }
         
-        if ($vspipeMethod -eq 'ffmpeg') {
+        if ($pipeMethod -eq 'ffmpeg') {
             Write-Log "Запуск через FFmpeg пайп" -Severity Verbose -Category 'Video'
+            
+            # Определение формата input для ffmpeg
+            $inputFormat = if ($scriptEngine -eq 'AviSynth') { 'avisynth' } else { 'vapoursynth' }
+            
             $ffmpegArgs = @(
                 '-y', '-hide_banner', '-loglevel', 'error', '-nostats'
-                '-f', 'vapoursynth', '-i', $Job.ScriptFile
+                '-f', $inputFormat, '-i', $Job.ScriptFile
                 '-f', 'yuv4mpegpipe', '-strict', '-1', '-'
             )
             $cmd="$($global:VideoTools.FFmpeg) $($ffmpegArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
@@ -225,14 +283,14 @@ function Invoke-Encoder {
 
             & $global:VideoTools.FFmpeg $ffmpegArgs | & $Job.EncoderPath $encArgs
         } else {
-            Write-Log "Запуск через vspipe" -Severity Verbose -Category 'Video'
-            $vspipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
+            Write-Log "Запуск через $pipeMethod" -Severity Verbose -Category 'Video'
+            $pipeArgs = @('-c', 'y4m', $Job.ScriptFile, '-')
             
-            $cmd="$($global:VideoTools.VSPipe) $($vspipeArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
+            $cmd="$pipeTool $($pipeArgs -join ' ') | & $($Job.EncoderPath) $($encArgs -join ' ')"
             Write-Log $cmd -Severity Verbose -Category 'Video'
             $Job.CommandLines+=@{'EncodeVideo'=$cmd}
 
-            & $global:VideoTools.VSPipe $vspipeArgs | & $Job.EncoderPath $encArgs
+            & $pipeTool $pipeArgs | & $Job.EncoderPath $encArgs
         }
     }
     

@@ -48,8 +48,8 @@
         AutoCropThreshold  = 1000
         VSPipeMethod       = "vspipe"  # vspipe или ffmpeg
         CalculateVMAF      = $false
-        AviSynthPipeMethod = 'avs2pipemod'
-        #ScriptEngine       = 'AviSynth'
+        AviSynthPipeMethod = 'avs2pipemod'  # avs2pipemod или ffmpeg
+        ScriptEngine       = 'VapourSynth'  # VapourSynth или AviSynth
     }
     
     # Коды энкодеров для имен файлов

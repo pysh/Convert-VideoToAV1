@@ -1,5 +1,6 @@
 param(
     [string]$InputDir = 'g:\Видео\Сериалы\Зарубежные\Рассказы из петли (Tales from the Loop)\Tales.From.The.Loop.S01.HDR.2160p.Rutracker\',
+    [string[]]$InputFiles,  # Массив конкретных файлов для обработки
     [string]$Encoder  = "SvtAv1Enc.TalesFromTheLoop",
     [string]$InputFilter = 'S01E01' ,#'^(?!.*S01E10).*$',
     [PSCustomObject]$CropParameters, # = @{Left=0;Top=120;Right=0;Bottom=120},
@@ -9,7 +10,8 @@ param(
     [switch]$CopyVideo,
     [switch]$KeepTempFiles,
     [switch]$CalculateMetrics,
-    [string]$TrimStartSeconds
+    [string]$TrimStartSeconds,
+    [int]$MaxConcurrentJobs = 1  # Количество одновременных потоков обработки
 )
 
 Set-Location $PSScriptRoot
@@ -23,9 +25,15 @@ $params = @{
     CropParameters   = $CropParameters #@{Left=0;Top=196;Right=0;Bottom=196}
     CustomTemplatePath = if (Test-Path -LiteralPath (Join-Path $InputDir 'template.vpy')) {
         Join-Path $InputDir 'template.vpy'
+    } elseif (Test-Path -LiteralPath (Join-Path $InputDir 'template.avs')) {
+        Join-Path $InputDir 'template.avs'
     } else {
         $CustomTemplatePath
     }
+    MaxConcurrentJobs = $MaxConcurrentJobs
+}
+if ($InputFiles -and $InputFiles.Count -gt 0) {
+    $params.InputFiles = $InputFiles
 }
 if ($CopyAudio) { $params.CopyAudio = $true }
 if ($CopyVideo) { $params.CopyVideo = $true }

@@ -464,29 +464,72 @@ function Get-VideoQualityMetrics {
 function Get-VideoScriptInfo {
     <#
     .SYNOPSIS
-        Получает информацию о VapourSynth скрипте
+        Получает информацию о скрипте (VapourSynth или AviSynth)
     #>
     [CmdletBinding()]
-    param ([Parameter(Mandatory)][string]$ScriptPath)
+    param (
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [ValidateSet('VapourSynth', 'AviSynth')]
+        [string]$Engine = 'VapourSynth'
+    )
     
     try {
-        $vspInfo = (& vspipe --info $ScriptPath) # 2>&1)
-        
-        if ($LASTEXITCODE -ne 0) {
-            throw "Ошибка выполнения vspipe: $vspInfo"
-        }
-
-        $infoHash = @{}
-        $vspInfo | ForEach-Object {
-            if ($_ -match '^(?<name>.*?):\s*(?<value>.*)$') {
-                $infoHash[$Matches.name] = $Matches.value
+        if ($Engine -eq 'AviSynth') {
+            # Получение информации об AviSynth скрипте через ffprobe
+            $ffprobeApp = if ($global:VideoTools.FFprobe) { $global:VideoTools.FFprobe } else { 'ffprobe' }
+            $ffprobeArgs = @(
+                '-v', 'error',
+                '-f', 'avisynth',
+                '-show_entries', 'stream=index,r_frame_rate,nb_frames,width,height,codec_name',
+                '-of', 'json',
+                $ScriptPath
+            )
+            
+            $ffprobeOutput = & $ffprobeApp @ffprobeArgs 2>&1
+            $infoJson = $ffprobeOutput | ConvertFrom-Json
+            
+            if ($infoJson.streams -and $infoJson.streams[0]) {
+                $stream = $infoJson.streams[0]
+                $fps = $stream.r_frame_rate
+                
+                # Конвертация FPS из дроби в число
+                if ($fps -match '^(?<num>\d+)/(?<den>\d+)$') {
+                    $fpsValue = [double]$Matches.num / [double]$Matches.den
+                } else {
+                    $fpsValue = [double]$fps
+                }
+                
+                return [PSCustomObject]@{
+                    Index   = $stream.index
+                    Frames  = [int]$stream.nb_frames
+                    FPS     = [math]::Round($fpsValue, 3)
+                    Width   = [int]$stream.width
+                    Height  = [int]$stream.height
+                    Codec   = $stream.codec_name
+                }
+            } else {
+                throw "Не удалось получить информацию из AviSynth скрипта"
             }
-        }
+        } else {
+            # VapourSynth через vspipe
+            $vspInfo = (& vspipe --info $ScriptPath) 2>&1
+            
+            if ($LASTEXITCODE -ne 0) {
+                throw "Ошибка выполнения vspipe: $vspInfo"
+            }
 
-        return [PSCustomObject]$infoHash
+            $infoHash = @{}
+            $vspInfo | ForEach-Object {
+                if ($_ -match '^(?<name>.*?):\s*(?<value>.*)$') {
+                    $infoHash[$Matches.name] = $Matches.value
+                }
+            }
+
+            return [PSCustomObject]$infoHash
+        }
     }
     catch {
-        Write-Log "Ошибка при получении информации о скрипте VapourSynth: $_" -Severity Error -Category 'Video'
+        Write-Log "Ошибка при получении информации о скрипте ($Engine): $_" -Severity Error -Category 'Video'
         throw
     }
 }
