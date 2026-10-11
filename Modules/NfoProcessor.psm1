@@ -18,7 +18,7 @@ function Invoke-NfoProcessing {
     
     if ($nfoContent -match '^\s*<\?xml') {
         [xml]$xml = $nfoContent
-        $episode = $xml.episodedetails
+        $episode = $xml.episodedetails ?? $xml.movie
     } else {
         throw "NFO файл не является XML: $($Job.NfoPath)"
     }

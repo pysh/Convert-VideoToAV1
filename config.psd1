@@ -102,15 +102,16 @@
                         DisplayName = "x265 Main"
                         CodecCode   = 'hevc'
                         Quality     = 25
-                        Preset      = 'slow'
+                        Preset      = 'slower'
                         BaseArgs    = @(
                             # '--frame-threads', 12,
-                            '--output-depth', '10',
+                            # '--output-depth', '10',
                             # '--no-strong-intra-smoothing',
-                            '--range', 'limited',
-                            '--colorprim', 'bt709',
-                            '--transfer', 'bt709',
-                            '--colormatrix', 'bt709'
+                            # '--range', 'limited',
+                            # '--colorprim', 'bt709',
+                            # '--transfer', 'bt709',
+                            # '--colormatrix', 'bt709'
+                            '--video-signal-type-preset', 'BT709_YCC' # --colorprim bt709 --transfer bt709 --colormatrix bt709 --range limited --chromaloc 0
                         )
                     }
                     grain = @{
@@ -148,12 +149,33 @@
                     main             = @{
                         DisplayName = "SVT-AV1 Main Preset"
                         CodecCode   = 'av1'
-                        Quality     = 35
+                        Quality     = 34
                         Preset      = 3
                         BaseArgs    = @(
                             '--rc', 0,
+                            '--tune', 5,
                             '--progress', 2,
                             '--enable-qm' , 1,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 12,
+                            '--color-range', 0,
+                            '--color-primaries', 1,
+                            '--transfer-characteristics', 1,
+                            '--matrix-coefficients', 1
+                        )
+                    }
+                    Boys             = @{
+                        DisplayName = "SVT-AV1 Main Preset"
+                        CodecCode   = 'av1'
+                        Quality     = 36
+                        Preset      = 3
+                        BaseArgs    = @(
+                            '--rc', 0,
+                            '--tune', 5,
+                            '--progress', 2,
+                            '--enable-qm' , 1,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 12,
                             '--color-range', 0,
                             '--color-primaries', 1,
                             '--transfer-characteristics', 1,
@@ -182,13 +204,13 @@
                     Sugar            = @{
                         DisplayName = "SVT-AV1 Sugar"
                         CodecCode   = 'av1'
-                        Quality     = 34
+                        Quality     = 35
                         Preset      = 3
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', 2,
                             '--enable-qm' , 1,
-                            '--tune', 5,
+                            '--tune', 1,
                             "--film-grain-denoise", 0,
                             "--film-grain", 10,
                             '--color-range', '0',
@@ -218,6 +240,25 @@
                         )
                     }
 
+                    Wayne = @{
+                        DisplayName = "SVT-AV1 Wayne"
+                        CodecCode   = 'av1'
+                        Quality     = 35
+                        Preset      = 3
+                        BaseArgs    = @(
+                            '--rc', '0',
+                            # '--lp', 5,
+                            '--progress', 2,
+                            '--enable-qm' , 1,
+                            '--tune', 1,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 12,
+                            '--color-range', '0',
+                            '--color-primaries', '1',
+                            '--transfer-characteristics', '1',
+                            '--matrix-coefficients', '1'
+                        )
+                    }
                     DetHole          = @{
                         DisplayName = "SVT-AV1"
                         CodecCode   = 'av1'
@@ -241,15 +282,15 @@
                     grain            = @{
                         DisplayName = "SVT-AV1 Grain"
                         CodecCode   = 'av1'
-                        Quality     = 27
+                        Quality     = 36
                         Preset      = 3
                         BaseArgs    = @(
                             '--rc', '0',
                             '--progress', 2,
                             '--enable-qm' , 1,
-                            # '--tune', 2,
+                            '--tune', 5,
                             "--film-grain-denoise", 0,
-                            "--film-grain", 10,
+                            "--film-grain", 12,
                             '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',

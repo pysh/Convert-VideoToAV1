@@ -14,3 +14,18 @@ clip = core.resize.Spline36(clip, format=vs.YUV420P10, dither_type="error_diffus
 #clip = core.fmtc.bitdepth(clip, bits=10)
 clip = core.std.Crop(clip, {CropLeft}, {CropRight}, {CropTop}, {CropBottom})
 clip.set_output()
+
+
+$ffmpegParams = @(
+'-f', 'vapoursynth',
+'-i', 'r:\Temp\Sugar.S02E05.WEB-DL.2160p.DV.HDR10.RGzsRutracker_EncodingTests\Sugar.S02E05.WEB-DL.2160p.DV.HDR10.RGzsRutracker_sample.vpy',
+'-c:v', 'hevc_nvenc',
+'-tune', 'lossless',
+'-rc', 'constqp',
+'-qp', 0,
+'y:\.temp\Sugar.S02E05.WEB-DL.2160p.DV.HDR10.RGzsRutracker_sample[LL].mkv'
+)
+
+
+
+. vspipe 'r:\Temp\Sugar.S02E05.WEB-DL.2160p.DV.HDR10.RGzsRutracker_EncodingTests\Sugar.S02E05.WEB-DL.2160p.DV.HDR10.RGzsRutracker_sample.vpy' -c y4m - | & 'SvtAv1EncApp.exe' --input stdin --output 'y:\.temp\Sugar.S02E05.WEB-DL.2160p.DV.HDR10.RGzsRutracker_sample[LL].ivf' --progress 2 --lossless 1 --color-range 0 --color-primaries 1 --transfer-characteristics 1 --matrix-coefficients 1 --frames 7063

@@ -442,6 +442,7 @@ function Get-VideoQualityMetrics3 {
     $effectiveThrottle = [Math]::Max(1, [Math]::Min($ThrottleLimit, $DistortedPaths.Count))
     $parallelMode = $Parallel -and $DistortedPaths.Count -gt 1
 
+<# Подробный вывод ----------
     Write-Host "`n========================================" -ForegroundColor Cyan
     Write-Host "  АНАЛИЗ КАЧЕСТВА ВИДЕО" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
@@ -456,7 +457,7 @@ function Get-VideoQualityMetrics3 {
         Write-Host "  Внимание: параллельный GPU-декодинг может перегрузить GPU при ThrottleLimit > 1" -ForegroundColor DarkYellow
     }
     Write-Host "========================================" -ForegroundColor Cyan
-
+#>
     # ---------- Формируем jobs (вся подготовка уже сделана) ----------
     $jobs = [System.Collections.Generic.List[object]]::new()
     $counter = 0
@@ -492,11 +493,12 @@ function Get-VideoQualityMetrics3 {
     $processJob = {
         $job = $_
         $fileName = [IO.Path]::GetFileName($job.DistortedPath)
-        Write-Host "[$($job.Id)/$($job.Total)] $fileName" -ForegroundColor Yellow
+        Write-Verbose "[$($job.Id)/$($job.Total)] $fileName"
 
         $result = [PSCustomObject]@{
             Id            = $job.Id
             DistortedPath = $job.DistortedPath
+            DistortedSize = (Get-Item -LiteralPath $job.DistortedPath).Length /1MB #[IO.FileInfo]::new($job.DistortedPath).Length
             VMAF          = $null
             VMAFNeg       = $null
             XPSNR         = $null
@@ -530,7 +532,9 @@ function Get-VideoQualityMetrics3 {
                 )
 
                 $timer = [System.Diagnostics.Stopwatch]::StartNew()
+                Write-Verbose "  ffmpeg $($ffargs | Out-String)"
                 $output = & $job.FFmpegPath $ffargs 2>&1
+                Write-Verbose ($output | Out-String)
                 $timer.Stop()
                 $result.Time = $timer
 
@@ -584,7 +588,9 @@ function Get-VideoQualityMetrics3 {
                 if ($job.SSIMCropArgs) { $ssimArgs += $job.SSIMCropArgs }
                 if ($job.SSIMCacheIndex) { $ssimArgs += "--cache-index" }
 
+                Write-Verbose "SSIMULACRA2 $($ssimArgs | Out-String)"
                 $output = & $job.FFVshipPath $ssimArgs 2>&1
+                Write-Verbose ($output | Where-Object {$_ -NotMatch ".*\[\|*\s*\].*"} | Out-String)
                 if ($LASTEXITCODE -eq 0) {
                     $outStr = $output -join "`n"
                     $ssimData = @{}

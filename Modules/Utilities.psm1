@@ -16,9 +16,11 @@ function Convert-FpsToDouble {
     if ($FpsString -match '^\d+/\d+$') {
         $numerator, $denominator = $FpsString -split '/'
         return [double]$numerator / [double]$denominator
-    } elseif ($FpsString -match '^\d+(\.\d+)?$') {
+    }
+    elseif ($FpsString -match '^\d+(\.\d+)?$') {
         return [double]$FpsString
-    } else {
+    }
+    else {
         throw "Некорректный формат FPS: $FpsString"
     }
 }
@@ -69,7 +71,8 @@ function Get-VideoFrameRate {
                 $fpsLine = $vspipeOutput | Where-Object { $_ -match 'FPS:\s*([\d\/]+(?:\.\d+)?)' }
                 if ($fpsLine) {
                     $fps = [regex]::Match($fpsLine, 'FPS:\s*([\d\/]+(?:\.\d+)?)').Groups[1].Value
-                } else {
+                }
+                else {
                     throw "Не удалось найти информацию о FPS в выводе vspipe"
                 }
             }
@@ -89,7 +92,8 @@ function Get-VideoFrameRate {
                 $fpsJson = $ffprobeOutput | ConvertFrom-Json
                 if ($fpsJson.streams -and $fpsJson.streams[0].r_frame_rate) {
                     $fps = $fpsJson.streams[0].r_frame_rate
-                } else {
+                }
+                else {
                     throw "Не удалось получить FPS из AviSynth скрипта"
                 }
             }
@@ -113,7 +117,8 @@ function Get-VideoFrameRate {
         # Общая логика обработки FPS
         if ($null -ne $fps) {
             return [double] [Math]::Round((Convert-FpsToDouble -Fps $fps), 2)
-        } else {
+        }
+        else {
             throw "Не удалось получить значение FPS"
         }
     }
@@ -251,13 +256,15 @@ function Get-VideoQualityMetrics {
     # Получаем FPS для каждого файла
     $videoRefFrameRate = if ($referenceType -eq 'Video') {
         Get-VideoFrameRate -VideoPath $ReferencePath
-    } else {
+    }
+    else {
         Get-ScriptFrameRate -ScriptPath $ReferencePath -ScriptType $referenceType
     }
 
     $videoDistFrameRate = if ($distortedType -eq 'Video') {
         Get-VideoFrameRate -VideoPath $DistortedPath
-    } else {
+    }
+    else {
         Get-ScriptFrameRate -ScriptPath $DistortedPath -ScriptType $distortedType
     }
     
@@ -293,7 +300,7 @@ function Get-VideoQualityMetrics {
             [string]$Path,
             [string]$FileType, 
             [Parameter(Mandatory = $false)]
-            [double]$FrameRate=25
+            [double]$FrameRate = 25
         )
         
         $argsList = @()
@@ -464,29 +471,140 @@ function Get-VideoQualityMetrics {
 function Get-VideoScriptInfo {
     <#
     .SYNOPSIS
-        Получает информацию о VapourSynth скрипте
+        Получает информацию о видеофайле или скрипте (VapourSynth, AviSynth)
     #>
     [CmdletBinding()]
-    param ([Parameter(Mandatory)][string]$ScriptPath)
-    
+    param (
+        [Parameter(Mandatory)][string]$ScriptPath
+        # [ValidateSet('VapourSynth', 'AviSynth')]
+        # [string]$Engine = 'VapourSynth'
+    )
+
     try {
-        $vspInfo = (& vspipe --info $ScriptPath) # 2>&1)
-        
-        if ($LASTEXITCODE -ne 0) {
-            throw "Ошибка выполнения vspipe: $vspInfo"
+
+        $Engine = switch ([IO.Path]::GetExtension($ScriptPath).ToLower()) {
+            '.vpy'   { 'VapourSynth' }
+            '.avs'   { 'AviSynth' }
+            default  { 'other' }
         }
 
-        $infoHash = @{}
-        $vspInfo | ForEach-Object {
-            if ($_ -match '^(?<name>.*?):\s*(?<value>.*)$') {
-                $infoHash[$Matches.name] = $Matches.value
+        if ($Engine -eq 'VapourSynth') {
+            # VapourSynth через vspipe
+            $vspInfo = (& vspipe --info $ScriptPath) 2>&1
+            
+            if ($LASTEXITCODE -ne 0) {
+                throw "Ошибка выполнения vspipe: $vspInfo"
+            }
+
+            $infoHash = @{}
+            $vspInfo | ForEach-Object {
+                if ($_ -match '^(?<name>.*?):\s*(?<value>.*)$') {
+                    $infoHash[$Matches.name] = $Matches.value
+                }
+            }
+            return [PSCustomObject]$infoHash
+        }
+        else {
+            # Получение информации через ffprobe
+            $ffprobeApp = if ($global:VideoTools.FFprobe) { $global:VideoTools.FFprobe } else { 'ffprobe' }
+            $ffprobeArgs = @(
+                '-v', 'error'
+                if ($Engine -eq 'AviSynth') { '-f', 'avisynth' }
+                # '-select_streams', 'v:0',
+                #'-show_entries', 'stream=index,r_frame_rate,nb_frames,width,height,codec_name,duration,color_primaries,color_transfer,color_space:stream_side_data=side_data_type,dv_profile,dv_bl_signal_compatibility_id,bl_present_flag',
+                '-count_packets',
+                '-show_entries', 'stream',
+                '-of', 'json',
+                $ScriptPath
+            )
+            Write-Verbose "ffprobe args: $($ffprobeArgs -join ' ')"
+            $ffprobeOutput = & $ffprobeApp @ffprobeArgs 2>&1
+            Write-Verbose "ffprobe output: $($ffprobeOutput | Out-String)"
+            $infoJson = $ffprobeOutput | ConvertFrom-Json
+            
+            if ($infoJson.streams -and $infoJson.streams[0]) {
+                $stream = $infoJson.streams[0]
+                $fps = $stream.r_frame_rate
+                
+                # Количество кадров. Приоритет: nb_frames -> NUMBER_OF_FRAMES
+                $frameCount = $null
+                foreach ($v in @($stream.nb_read_packets, $stream.nb_frames, $stream.tags.NUMBER_OF_FRAMES)) {
+                    if (-not [string]::IsNullOrWhiteSpace($v) -and $v -ne 'N/A') {
+                        $frameCount = [int]$v
+                        break
+                    }
+                }
+                
+                #$frameCount = $stream.nb_read_packets ?? $stream.nb_frames ?? $stream.tags.NUMBER_OF_FRAMES
+                # if (-not $frameCount -and $stream.tags.NUMBER_OF_FRAMES) {
+                #     $frameCount = $stream.tags.NUMBER_OF_FRAMES
+                # }
+
+                # Конвертация FPS из дроби в число
+                if ($fps -match '^(?<num>\d+)/(?<den>\d+)$') {
+                    $fpsNum = [double]$Matches.num
+                    $fpsDen = [double]$Matches.den
+                    $fpsValue = $fpsNum / $fpsDen
+                }
+                else {
+                    $fpsValue = [double]$fps
+                    $fpsNum = $fpsValue
+                    $fpsDen = 1
+                }
+                
+                # Длительность
+                $duration = [double]$stream.duration
+                if (-not $duration -and $fpsNum -and $fpsDen) {
+                    $duration = $frameCount / ($fpsNum / $fpsDen)
+                }
+
+                # --- Анализ Dolby Vision ---
+                $isDolbyVision = $false
+                $dvProfile = $null
+                $dvBlPresent = $false
+                $dvBlCompatId = $null
+
+                if ($stream.side_data_list) {
+                    $doviData = $stream.side_data_list | Where-Object { $_.side_data_type -eq 'DOVI configuration record' }
+                    if ($doviData) {
+                        $isDolbyVision = $true
+                        $dvProfile = $doviData.dv_profile
+                        $dvBlPresent = $doviData.bl_present_flag -eq 1
+                        $dvBlCompatId = $doviData.dv_bl_signal_compatibility_id
+                    }
+                }
+
+                # --- Анализ HDR10 ---
+                $isHdr10 = $false
+                if ($stream.color_transfer -eq 'smpte2084' -and $stream.color_primaries -eq 'bt2020') {
+                    $isHdr10 = $true
+                }
+
+                return [PSCustomObject]@{
+                    Index  = $stream.index
+                    Frames = $frameCount
+                    FPS    = [math]::Round($fpsValue, 3)
+                    Width  = [int]$stream.width
+                    Height = [int]$stream.height
+                    Codec  = $stream.codec_name
+                    FPSnum = $fpsNum
+                    FPSden = $fpsDen
+                    Duration = $duration
+                    DurationTimeSpan = [TimeSpan]::FromSeconds($duration)
+                    color_primaries = $stream.color_primaries
+                    color_transfer = $stream.color_transfer
+                    color_space = $stream.color_space
+                    isDoVi = $isDolbyVision
+                    isHDR = $isHdr10
+                }
+            }
+            else {
+                throw "Не удалось получить информацию из видеофайла или AviSynth скрипта с помощью ffprobe"
             }
         }
-
-        return [PSCustomObject]$infoHash
     }
     catch {
-        Write-Log "Ошибка при получении информации о скрипте VapourSynth: $_" -Severity Error -Category 'Video'
+        Write-Log "Ошибка при получении информации о файле ($Engine): $_" -Severity Error -Category 'Video'
         throw
     }
 }
@@ -519,7 +637,8 @@ function Get-VideoCropParameters {
         $scriptDir = Split-Path -Parent $PSScriptRoot
         $templateFullPath = if (Test-Path -LiteralPath (Join-Path $scriptDir $templatePath) -PathType Leaf) {
             Join-Path $scriptDir $templatePath
-        } else {
+        }
+        else {
             'd:\PSScripts\Convert-VideoToAV1\Templates\AutoCropTemplate.py'
         }
         
@@ -694,12 +813,12 @@ function Get-EncoderCode {
         $baseEncoder = $EncoderName -split '\.' | Select-Object -First 1
         
         switch -Wildcard ($baseEncoder) {
-            '*265*'   { 'hevc' }
-            '*av1*'   { 'av1' }
-            '*av1enc*'{ 'av1' }
-            '*vp9*'   { 'vp9' }
-            '*h264*'  { 'h264' }
-            default   { 'enc' }  # fallback
+            '*265*' { 'hevc' }
+            '*av1*' { 'av1' }
+            '*av1enc*' { 'av1' }
+            '*vp9*' { 'vp9' }
+            '*h264*' { 'h264' }
+            default { 'enc' }  # fallback
         }
     }
     catch {
@@ -801,10 +920,10 @@ function Test-EncoderPreset {
         $result = @{
             EncoderName = $EncoderName
             BaseEncoder = $baseEncoder
-            PresetName = $presetName
+            PresetName  = $presetName
             IsAvailable = $false
-            HasConfig = $false
-            Config = $null
+            HasConfig   = $false
+            Config      = $null
         }
         
         # Проверяем наличие базового энкодера
@@ -869,18 +988,18 @@ function Get-AvailableEncoders {
                 "Display" {
                     $displayName = $preset.DisplayName ?? $presetKey
                     $result += [PSCustomObject]@{
-                        FullName = "${encoderKey}.${presetKey}"
+                        FullName    = "${encoderKey}.${presetKey}"
                         DisplayName = $displayName
-                        Encoder = $encoderKey
-                        Preset = $presetKey
+                        Encoder     = $encoderKey
+                        Preset      = $presetKey
                     }
                 }
                 "Full" {
                     $result += [PSCustomObject]@{
                         FullName = "${encoderKey}.${presetKey}"
-                        Encoder = $encoderKey
-                        Preset = $presetKey
-                        Config = $preset
+                        Encoder  = $encoderKey
+                        Preset   = $presetKey
+                        Config   = $preset
                     }
                 }
             }
@@ -1412,7 +1531,8 @@ function Convert-MP4TagsToXml {
             $value = $prop.Value
             if ($value -is [string]) {
                 $tagsHash[$prop.Name] = $value
-            } elseif ($value) {
+            }
+            elseif ($value) {
                 $tagsHash[$prop.Name] = $value.ToString()
             }
         }
@@ -1429,27 +1549,27 @@ function Convert-MP4TagsToXml {
 
     # Настройки XML
     $settings = [System.Xml.XmlWriterSettings]@{
-        Indent = $true
-        Encoding = [System.Text.Encoding]::UTF8
+        Indent             = $true
+        Encoding           = [System.Text.Encoding]::UTF8
         OmitXmlDeclaration = $false
     }
     
     # Маппинг тегов
     $mapping = @{
-        'title' = 'TITLE'
-        'artist' = 'ARTIST'
-        'album' = 'ALBUM'
-        'date' = 'DATE_RELEASED'
-        'year' = 'DATE_RELEASED'
-        'comment' = 'COMMENT'
-        'genre' = 'GENRE'
-        'encoder' = 'ENCODER'
-        'copyright' = 'COPYRIGHT'
-        'description' = 'DESCRIPTION'
-        'synopsis' = 'SUMMARY'
-        'show' = 'SHOWTITLE'
-        'episode_id' = 'PART_NUMBER'
-        'season_number' = 'SEASON_NUMBER'
+        'title'          = 'TITLE'
+        'artist'         = 'ARTIST'
+        'album'          = 'ALBUM'
+        'date'           = 'DATE_RELEASED'
+        'year'           = 'DATE_RELEASED'
+        'comment'        = 'COMMENT'
+        'genre'          = 'GENRE'
+        'encoder'        = 'ENCODER'
+        'copyright'      = 'COPYRIGHT'
+        'description'    = 'DESCRIPTION'
+        'synopsis'       = 'SUMMARY'
+        'show'           = 'SHOWTITLE'
+        'episode_id'     = 'PART_NUMBER'
+        'season_number'  = 'SEASON_NUMBER'
         'episode_number' = 'PART_NUMBER'
     }
     
@@ -1477,7 +1597,8 @@ function Convert-MP4TagsToXml {
             # Определяем имя тега
             $tagName = if ($mapping.ContainsKey($lowerKey)) {
                 $mapping[$lowerKey]
-            } else {
+            }
+            else {
                 $key.ToUpper()
             }
 
@@ -1501,7 +1622,7 @@ function Convert-MP4TagsToXml {
 }
 
 function Get-VideoQualityMetrics2 {
-<#
+    <#
 .SYNOPSIS
     Calculates VMAF and XPSNR quality metrics for video files with parallel processing.
 .EXAMPLE
@@ -1541,7 +1662,7 @@ function Get-VideoQualityMetrics2 {
         [ValidateSet('mean', 'harmonic_mean')]
         [string]$PoolMethod = 'mean',
         
-        [switch]$Parallel=$true
+        [switch]$Parallel = $true
     )
     
     # Validate files
@@ -1722,120 +1843,120 @@ function Get-VideoQualityMetrics2 {
     # $results = if ($Parallel -and $DistortedPaths.Count -gt 1) {
     #     Write-Host "Processing $($DistortedPaths.Count) videos in parallel..." -ForegroundColor Cyan
         
-        $jobResults = $jobs.GetEnumerator() | ForEach-Object -Parallel {
-            $jobName = $_.Key
-            $job = $_.Value
+    $jobResults = $jobs.GetEnumerator() | ForEach-Object -Parallel {
+        $jobName = $_.Key
+        $job = $_.Value
             
-            $ffmpeg = $job.FFmpegPath
+        $ffmpeg = $job.FFmpegPath
             
-            Write-Host "[$($job.Id)/$($job.Total)] Processing: $([IO.Path]::GetFileName($job.DistortedPath))" -ForegroundColor Yellow
+        Write-Host "[$($job.Id)/$($job.Total)] Processing: $([IO.Path]::GetFileName($job.DistortedPath))" -ForegroundColor Yellow
             
-            $result = [PSCustomObject]@{ 
-                ReferencePath = $job.ReferencePath
-                DistortedPath = $job.DistortedPath
-                VMAF          = $null
-                VMAFTimer     = $null
-                VMAFffargs    = $null
-                XPSNR         = $null
-                XPSNRTimer    = $null
-                XPSNRffargs   = $null
-                job           = $job
+        $result = [PSCustomObject]@{ 
+            ReferencePath = $job.ReferencePath
+            DistortedPath = $job.DistortedPath
+            VMAF          = $null
+            VMAFTimer     = $null
+            VMAFffargs    = $null
+            XPSNR         = $null
+            XPSNRTimer    = $null
+            XPSNRffargs   = $null
+            job           = $job
+        }
+            
+        # Build input arguments with proper FPS for each file
+        $distArgs = @()
+        $distArgs += '-r', ($job.DistortedFPS.ToString().Replace(',', '.'))
+        if ($job.DistortedType -eq 'VapourSynth') {
+            $distArgs += '-f', 'vapoursynth'
+        }
+        elseif ($job.DistortedType -eq 'AviSynth') {
+            $distArgs += '-f', 'avisynth'
+        }
+        $distArgs += '-i', $job.DistortedPath
+            
+        $refArgs = @()
+        $refArgs += '-r', ($job.ReferenceFPS.ToString().Replace(',', '.'))
+        if ($job.ReferenceType -eq 'VapourSynth') {
+            $refArgs += '-f', 'vapoursynth'
+        }
+        elseif ($job.ReferenceType -eq 'AviSynth') {
+            $refArgs += '-f', 'avisynth'
+        }
+        $refArgs += '-i', $job.ReferencePath
+            
+        if ($job.Metrics -in ('Both', 'VMAF')) {
+            $ffargs = @(
+                "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
+            ) + $distArgs + $refArgs + @(
+                "-filter_complex", "$($job.FilterTemplate)$($job.VmafFilter)"
+                "-f", "null", "-"
+            )
+            $result.VMAFffargs = $ffargs
+            $VMAFTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            $output = & $ffmpeg $ffargs 2>&1
+            $VMAFTimer.Stop()
+            $result.VMAFTimer = $VMAFTimer
+            if ($output -join '`n' -match [regex]'(?m).*VMAF score: (?<vmaf>\d+\.+\d+).*') {
+                $result.VMAF = [double]$Matches.vmaf
+                Write-Host "VMAF calculation successful: $($result.VMAF)" -ForegroundColor DarkYellow
             }
-            
-            # Build input arguments with proper FPS for each file
-            $distArgs = @()
-            $distArgs += '-r', ($job.DistortedFPS.ToString().Replace(',', '.'))
-            if ($job.DistortedType -eq 'VapourSynth') {
-                $distArgs += '-f', 'vapoursynth'
-            }
-            elseif ($job.DistortedType -eq 'AviSynth') {
-                $distArgs += '-f', 'avisynth'
-            }
-            $distArgs += '-i', $job.DistortedPath
-            
-            $refArgs = @()
-            $refArgs += '-r', ($job.ReferenceFPS.ToString().Replace(',', '.'))
-            if ($job.ReferenceType -eq 'VapourSynth') {
-                $refArgs += '-f', 'vapoursynth'
-            }
-            elseif ($job.ReferenceType -eq 'AviSynth') {
-                $refArgs += '-f', 'avisynth'
-            }
-            $refArgs += '-i', $job.ReferencePath
-            
-            if ($job.Metrics -in ('Both', 'VMAF')) {
-                $ffargs = @(
-                    "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
-                ) + $distArgs + $refArgs + @(
-                    "-filter_complex", "$($job.FilterTemplate)$($job.VmafFilter)"
-                    "-f", "null", "-"
-                )
-                $result.VMAFffargs = $ffargs
-                $VMAFTimer = [System.Diagnostics.Stopwatch]::StartNew()
-                $output = & $ffmpeg $ffargs 2>&1
-                $VMAFTimer.Stop()
-                $result.VMAFTimer = $VMAFTimer
-                if ($output -join '`n' -match [regex]'(?m).*VMAF score: (?<vmaf>\d+\.+\d+).*') {
-                    $result.VMAF = [double]$Matches.vmaf
-                    Write-Host "VMAF calculation successful: $($result.VMAF)" -ForegroundColor DarkYellow
+            else {
+                Write-Warning "VMAF calculation failed. Output: $($output -join "`n")"
+                # Попробуем найти VMAF в другом формате вывода
+                if ($output -join '`n' -match [regex]'VMAF score:\s*(\d+\.\d+)') {
+                    $result.VMAF = [double]$Matches[1]
+                    Write-Host "VMAF found (alternative pattern): $($result.VMAF)" -ForegroundColor DarkYellow
                 }
                 else {
-                    Write-Warning "VMAF calculation failed. Output: $($output -join "`n")"
-                    # Попробуем найти VMAF в другом формате вывода
-                    if ($output -join '`n' -match [regex]'VMAF score:\s*(\d+\.\d+)') {
-                        $result.VMAF = [double]$Matches[1]
-                        Write-Host "VMAF found (alternative pattern): $($result.VMAF)" -ForegroundColor DarkYellow
-                    }
-                    else {
-                        $result.VMAF = $null
-                    }
+                    $result.VMAF = $null
                 }
             }
+        }
             
-            if ($job.Metrics -in ('Both', 'XPSNR')) {
-                $ffargs = @(
-                    "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
-                ) + $distArgs + $refArgs + @(
-                    "-filter_complex", "$($job.FilterTemplate)$($job.XpsnrFilter)"
-                    "-f", "null", "-"
-                )
-                $XPSNRTimer = [System.Diagnostics.Stopwatch]::StartNew()
-                $output = & $ffmpeg $ffargs 2>&1
-                $XPSNRTimer.Stop()
-                $result.XPSNRTimer = $XPSNRTimer
+        if ($job.Metrics -in ('Both', 'XPSNR')) {
+            $ffargs = @(
+                "-hide_banner", "-y", "-nostats" #, "-loglevel", "error"
+            ) + $distArgs + $refArgs + @(
+                "-filter_complex", "$($job.FilterTemplate)$($job.XpsnrFilter)"
+                "-f", "null", "-"
+            )
+            $XPSNRTimer = [System.Diagnostics.Stopwatch]::StartNew()
+            $output = & $ffmpeg $ffargs 2>&1
+            $XPSNRTimer.Stop()
+            $result.XPSNRTimer = $XPSNRTimer
 
-                # Ищем XPSNR в разных форматах вывода
-                # Формат 1: "XPSNR... y: XX.XX u: XX.XX v: XX.XX"
-                if ($output -join '`n' -match [regex]'(?m)XPSNR.*y:\s*(?<y>\d+\.\d+).*u:\s*(?<u>\d+\.\d+).*v:\s*(?<v>\d+\.\d+)') {
-                    $result.XPSNR = @{
-                        Y    = [double]$Matches['y']
-                        U    = [double]$Matches['u']
-                        V    = [double]$Matches['v']
-                        MIN  = (([double]$Matches['y'], [double]$Matches['u'], [double]$Matches['v']) | Measure-Object -Minimum).Minimum
-                        AVG  = ([double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 3
-                        WSUM = (4 * [double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 6
-                    }
-                    Write-Verbose "XPSNR calculation successful"
+            # Ищем XPSNR в разных форматах вывода
+            # Формат 1: "XPSNR... y: XX.XX u: XX.XX v: XX.XX"
+            if ($output -join '`n' -match [regex]'(?m)XPSNR.*y:\s*(?<y>\d+\.\d+).*u:\s*(?<u>\d+\.\d+).*v:\s*(?<v>\d+\.\d+)') {
+                $result.XPSNR = @{
+                    Y    = [double]$Matches['y']
+                    U    = [double]$Matches['u']
+                    V    = [double]$Matches['v']
+                    MIN  = (([double]$Matches['y'], [double]$Matches['u'], [double]$Matches['v']) | Measure-Object -Minimum).Minimum
+                    AVG  = ([double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 3
+                    WSUM = (4 * [double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 6
                 }
-                # # Формат 2: "PSNR y:XX.XX u:XX.XX v:XX.XX *"
-                # elseif ($output -join '`n' -match [regex]'(?m)PSNR.*y:\s*(?<y>\d+\.\d+).*u:\s*(?<u>\d+\.\d+).*v:\s*(?<v>\d+\.\d+)') {
-                #     $result.XPSNR = @{
-                #         Y    = [double]$Matches['y']
-                #         U    = [double]$Matches['u']
-                #         V    = [double]$Matches['v']
-                #         MIN  = (([double]$Matches['y'], [double]$Matches['u'], [double]$Matches['v']) | Measure-Object -Minimum).Minimum
-                #         AVG  = ([double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 3
-                #         WSUM = (4 * [double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 6
-                #     }
-                #     Write-Verbose "XPSNR calculation successful (pattern 2)"
-                # }
+                Write-Verbose "XPSNR calculation successful"
             }
-            Write-Host ""
-            return $result
-        } -ThrottleLimit ([Math]::Min($DistortedPaths.Count, $Threads))
+            # # Формат 2: "PSNR y:XX.XX u:XX.XX v:XX.XX *"
+            # elseif ($output -join '`n' -match [regex]'(?m)PSNR.*y:\s*(?<y>\d+\.\d+).*u:\s*(?<u>\d+\.\d+).*v:\s*(?<v>\d+\.\d+)') {
+            #     $result.XPSNR = @{
+            #         Y    = [double]$Matches['y']
+            #         U    = [double]$Matches['u']
+            #         V    = [double]$Matches['v']
+            #         MIN  = (([double]$Matches['y'], [double]$Matches['u'], [double]$Matches['v']) | Measure-Object -Minimum).Minimum
+            #         AVG  = ([double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 3
+            #         WSUM = (4 * [double]$Matches['y'] + [double]$Matches['u'] + [double]$Matches['v']) / 6
+            #     }
+            #     Write-Verbose "XPSNR calculation successful (pattern 2)"
+            # }
+        }
+        Write-Host ""
+        return $result
+    } -ThrottleLimit ([Math]::Min($DistortedPaths.Count, $Threads))
         
-        # Конвертируем результаты в массив
-        $results = @($jobResults)
+    # Конвертируем результаты в массив
+    $results = @($jobResults)
     # }
     # else {
     #     $results = @()
@@ -2002,7 +2123,7 @@ function ConvertTo-LatinTranslit {
     begin {
         # Функция создания словаря с учетом регистра
         function New-CaseSensitiveDictionary {
-            $dict = [System.Collections.Generic.Dictionary[string,string]]::new(
+            $dict = [System.Collections.Generic.Dictionary[string, string]]::new(
                 [System.StringComparer]::InvariantCulture
             )
             return $dict
@@ -2044,7 +2165,7 @@ function ConvertTo-LatinTranslit {
         
         # Функция клонирования словаря
         function Clone-Dictionary {
-            param([System.Collections.Generic.Dictionary[string,string]]$Source)
+            param([System.Collections.Generic.Dictionary[string, string]]$Source)
             $clone = New-CaseSensitiveDictionary
             foreach ($key in $Source.Keys) {
                 $clone.Add($key, $Source[$key])
@@ -2179,11 +2300,13 @@ function ConvertTo-LatinTranslit {
             if ($isUnc) {
                 # Для UNC путей сохраняем двойной слеш в начале
                 $result = '\\' + ($processedParts -join '\')
-            } else {
+            }
+            else {
                 # Определяем исходный разделитель
                 if ($result -contains '/') {
                     $result = $processedParts -join '/'
-                } else {
+                }
+                else {
                     $result = $processedParts -join '\'
                 }
                 
@@ -2192,7 +2315,8 @@ function ConvertTo-LatinTranslit {
                     $result = '\' + $result.TrimStart('\')
                 }
             }
-        } else {
+        }
+        else {
             # Обычная транслитерация всего текста
             $result = Convert-String -InputString $Text
             $result = Clean-Name -Name $result
@@ -2255,7 +2379,8 @@ function Export-AsLossless {
 
         if ($LASTEXITCODE -eq 0) {
             return $outFile
-        } else {
+        }
+        else {
             Write-Error "Encoding failed (exit code $LASTEXITCODE): $output"
             return $null
         }

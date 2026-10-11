@@ -1,9 +1,9 @@
 param(
-    [string]$InputDir = 'g:\Видео\Сериалы\Зарубежные\Рассказы из петли (Tales from the Loop)\Tales.From.The.Loop.S01.HDR.2160p.Rutracker\',
-    [string]$Encoder  = "SvtAv1Enc.TalesFromTheLoop",
-    [string]$InputFilter = 'S01E01' ,#'^(?!.*S01E10).*$',
-    [PSCustomObject]$CropParameters, # = @{Left=0;Top=120;Right=0;Bottom=120},
-    [string]$CustomTemplatePath='g:\Видео\Сериалы\Зарубежные\Рассказы из петли (Tales from the Loop)\Tales.From.The.Loop.S01.HDR.2160p.Rutracker\template.avs',
+    [string]$InputDir = 'g:\Видео\Сериалы\Зарубежные\Джентльмены (The Gentlemen)\The.Gentlemen.S02.NF.DV.HDR.WEB-DL.2160p.by.AKTEP\',
+    [string]$Encoder  = "SvtAv1Enc.grain",
+    [string]$InputFilter, # = '^(?!.*S05E0[1-6]).*$',
+    [PSCustomObject]$CropParameters = @{Left=0;Top=276;Right=0;Bottom=276},
+    [string]$CustomTemplatePath,
     [string]$TempDirectory,
     [switch]$CopyAudio,
     [switch]$CopyVideo,
@@ -33,4 +33,5 @@ if ($KeepTempFiles) { $params.KeepTempFiles = $true }
 if ($TempDirectory) { $params.TempDirectory = $TempDirectory }
 if ($TrimStartSeconds) { $params.TrimStartSeconds = $TrimStartSeconds }
 
+Write-Host $params -ForegroundColor DarkMagenta
 & ".\Convert-VideoToAV1.ps1" @params -Debug -Verbose

@@ -189,15 +189,15 @@ process {
                 
                 # Инициализация Job
                 $job = [ordered]@{
-                    WorkingDir = $workingDir
-                    OriginalPath = $videoFile.FullName
-                    BaseName = $baseName
-                    TempFiles = [System.Collections.Generic.List[string]]::new()
-                    StartTime = Get-Date
-                    EncoderName = $Encoder
-                    TrimStartSeconds = $TrimStartSeconds
+                    WorkingDir          = $workingDir
+                    OriginalPath        = $videoFile.FullName
+                    BaseName            = $baseName
+                    TempFiles           = [System.Collections.Generic.List[string]]::new()
+                    StartTime           = Get-Date
+                    EncoderName         = $Encoder
+                    TrimStartSeconds    = $TrimStartSeconds
                     TrimDurationSeconds = 0
-                    CropParameters = $CropParameters
+                    CropParameters      = $CropParameters
                 }
                 
                 # Расчет продолжительности при обрезке
@@ -239,47 +239,62 @@ process {
                 # 5. РАСЧЕТ МЕТРИК
                 if (-not $SkipMetrics) {
                     Write-Log "`n[5/6] CALCULATE METRICS (Crop parameters: $($job.CropParameters)" -Severity Information -Category 'Main'
-                    $metrics =Get-VideoQualityMetrics3 `
+                    $metrics = Get-VideoQualityMetrics3 `
                         -ReferencePath $job.VideoSource -DistortedPaths $job.VideoEncoded `
-                        -Metrics VMAF,SSIMULACRA2  `
+                        -Metrics VMAF `
                         -Crop $job.CropParameters `
                         -Subsample 9
                     $job.Metrics = $metrics
-                Write-Log $metrics -Severity Information -Category 'Main'
+                    Write-Log $metrics -Severity Information -Category 'Main'
                 }
 
                 # 6. СБОРКА ФИНАЛЬНОГО ФАЙЛА
                 Write-Log "`n[6/6] MUXING" -Severity Information -Category 'Main'
                 
                 # Формирование имени выходного файла
-                $encoderCode = Get-EncoderCode -EncoderName $job.EncoderName
-                
-                if ($job.NfoFields -and $job.NfoFields.SHOWTITLE) {
-                    $showTitle = $job.NfoFields.SHOWTITLE -replace '[\\/*?:"<>|]', '_'
-                    $season = [int]($job.NfoFields.SEASON_NUMBER ?? 1)
-                    $episode = [int]($job.NfoFields.PART_NUMBER ?? 1)
-                    $title = ($job.NfoFields.TITLE -replace '[\\/*?:"<>|]', '_') ?? 'Episode'
-                    $airDate = $job.NfoFields.AIR_DATE ?? $job.NfoFields.DATE_RELEASED ?? 'Unknown'
+                # Хелпер для очистки имени файла от недопустимых символов
+                $sanitize = { param([string]$s) if ($null -eq $s) { '' } else { $s -replace '[\\/*?:"<>|]', '_' } }
+
+                if ($job.NfoFields) {
+                    # Получение кода кодировки
+                    $encoderCode = Get-EncoderCode -EncoderName $job.EncoderName
                     
                     # Получение разрешения видео
                     $videoInfo = Get-VideoStats -VideoFilePath $job.VideoSource
                     $width = $videoInfo.ResolutionWidth
                     $height = $videoInfo.ResolutionHeight
-                    
-                    $resolution = switch ($width) {
-                        { $_ -gt 3840 } { "8k"; break }
-                        { $_ -gt 2560 } { "4k"; break }
-                        { $_ -gt 1920 } { "2k"; break }
-                        { $_ -gt 1280 } { "1080p"; break }
-                        default { "${height}p" }
+
+                    # Определение метки разрешения (порядок важен: от большего к меньшему)
+                    $resolution = if ($width -ge 7680) { '8k' }
+                    elseif ($width -ge 3840) { '4k' }
+                    elseif ($width -ge 2560) { '2k' }
+                    elseif ($width -ge 1920) { '1080p' }
+                    elseif ($width -ge 1280) { '720p' }
+                    else { "${height}p" }
+
+                    # Общие для обеих веток значения
+                    $title = & $sanitize $job.NfoFields.TITLE
+                    $airDate = $job.NfoFields.AIR_DATE ?? $job.NfoFields.DATE_RELEASED
+
+                    if ($job.NfoFields.season_number -and $job.NfoFields.part_number) {
+                        $showTitle = & $sanitize $job.NfoFields.SHOWTITLE
+                        $season = [int]($job.NfoFields.SEASON_NUMBER ?? 1)
+                        $episode = [int]($job.NfoFields.PART_NUMBER ?? 1)
+
+                        $outputFileName = ('{0} - s{1:00}e{2:00} - {3} [{4}][{5}][{6}].mkv' -f
+                            $showTitle, $season, $episode, $title, $airDate, $resolution, $encoderCode)
                     }
-                    
-                    $outputFileName = "{0} - s{1:00}e{2:00} - {3} [{4}][{5}][{6}].mkv" -f 
-                        $showTitle, $season, $episode, $title, $airDate, $resolution, $encoderCode
-                } else {
+                    else {
+                        $original_title = & $sanitize $job.NfoFields.ORIGINAL_TITLE
+
+                        $outputFileName = ('{0} ({1}) [{2}][{3}][{4}].mkv' -f
+                            $title, $original_title, $airDate, $resolution, $encoderCode)
+                    }
+                }
+                else {
                     $outputFileName = "$($job.BaseName)_[$encoderCode].mkv"
                 }
-                
+
                 $job.FinalOutput = Join-Path $OutputDirectory $outputFileName
                 
                 # Проверка существования выходного файла
@@ -306,17 +321,17 @@ process {
                 if ($job -and -not $KeepTempFiles -and $global:Config.Processing.DeleteTempFiles) {
                     foreach ($file in $job.TempFiles) {
                         if (Test-Path -LiteralPath $file) {
-                                Write-Log "Deleting temporary file: $file" -Severity Verbose -Category 'Main'
-                                Remove-Item -LiteralPath $file -Recurse -Force -ErrorAction SilentlyContinue
-                            }
-                        }
-                    }
-                    if (Test-Path -LiteralPath $job.WorkingDir) {
-                        if (-not (Get-ChildItem -LiteralPath $job.WorkingDir -Recurse -File)) {
-                            Remove-Item -LiteralPath $job.WorkingDir -Recurse -Force -ErrorAction SilentlyContinue
+                            Write-Log "Deleting temporary file: $file" -Severity Verbose -Category 'Main'
+                            Remove-Item -LiteralPath $file -Recurse -Force -ErrorAction SilentlyContinue
                         }
                     }
                 }
+                if (Test-Path -LiteralPath $job.WorkingDir) {
+                    if (-not (Get-ChildItem -LiteralPath $job.WorkingDir -Recurse -File)) {
+                        Remove-Item -LiteralPath $job.WorkingDir -Recurse -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
             catch {
                 Write-Log "ERROR processing $($videoFile.Name): $($_.Exception.Message)" -Severity Error -Category 'Main'
                 Write-Log $_.ScriptStackTrace -Severity Debug -Category 'Main'
