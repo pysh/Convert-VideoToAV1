@@ -39,6 +39,7 @@ function ConvertTo-Video {
     # Создание скрипта
     $scriptContent = New-VapourSynthScript -Job $Job -TemplatePath $selectedTemplate
     Set-Content -LiteralPath $Job.ScriptFile -Value $scriptContent -Force -Encoding UTF8
+    $Job.ScriptFileText = $scriptContent
     $Job.TempFiles.Add($Job.ScriptFile)
     $Job.TempFiles.Add($Job.CacheFile)
     $Job.TempFiles.Add(("$($Job.VideoSource).0.bsindex"))

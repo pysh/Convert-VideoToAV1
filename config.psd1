@@ -114,6 +114,22 @@
                             '--video-signal-type-preset', 'BT709_YCC' # --colorprim bt709 --transfer bt709 --colormatrix bt709 --range limited --chromaloc 0
                         )
                     }
+                    dtf  = @{
+                        DisplayName = "x265 Main"
+                        CodecCode   = 'hevc'
+                        Quality     = 23
+                        Preset      = 'slow'
+                        BaseArgs    = @(
+                            # '--frame-threads', 12,
+                            # '--output-depth', '10',
+                            # '--no-strong-intra-smoothing',
+                            # '--range', 'limited',
+                            # '--colorprim', 'bt709',
+                            # '--transfer', 'bt709',
+                            # '--colormatrix', 'bt709'
+                            '--video-signal-type-preset', 'BT709_YCC' # --colorprim bt709 --transfer bt709 --colormatrix bt709 --range limited --chromaloc 0
+                        )
+                    }
                     grain = @{
                         DisplayName = "x265 Film Grain"
                         CodecCode   = 'hevc'
@@ -132,11 +148,11 @@
                     UMent = @{
                         DisplayName = "x265 Main"
                         CodecCode   = 'hevc'
-                        Quality     = 24
+                        Quality     = 25
                         Preset      = 'slow'
                         BaseArgs    = @(
                             # '--frame-threads', 12,
-                            '--output-depth', '10',
+                            '--output-depth', 8,
                             # '--no-strong-intra-smoothing',
                             '--range', 'limited',
                             '--colorprim', 'bt709',
@@ -158,6 +174,44 @@
                             '--enable-qm' , 1,
                             "--film-grain-denoise", 0,
                             "--film-grain", 12,
+                            '--color-range', 0,
+                            '--color-primaries', 1,
+                            '--transfer-characteristics', 1,
+                            '--matrix-coefficients', 1
+                        )
+                    }
+                    Gentlemen_s02 = @{
+                        DisplayName = "SVT-AV1 Gentlemen_s02"
+                        CodecCode   = 'av1'
+                        Quality     = 30
+                        Preset      = 3
+                        BaseArgs    = @(
+                            '--rc', 0,
+                            # '--lp', 5,
+                            '--tune', 5,
+                            '--progress', 2,
+                            '--enable-qm' , 1,
+                            "--film-grain-denoise", 0,
+                            "--film-grain", 8,
+                            '--color-range', 0,
+                            '--color-primaries', 1,
+                            '--transfer-characteristics', 1,
+                            '--matrix-coefficients', 1
+                        )
+                    }
+                    CrystalLake = @{
+                        DisplayName = "SVT-AV1 Crystal Lake"
+                        CodecCode   = 'av1'
+                        Quality     = 30
+                        Preset      = 3
+                        BaseArgs    = @(
+                            '--rc', 0,
+                            # '--lp', 5,
+                            '--tune', 5,
+                            '--progress', 2,
+                            '--enable-qm' , 1,
+                            # "--film-grain-denoise", 0,
+                            # "--film-grain", 12,
                             '--color-range', 0,
                             '--color-primaries', 1,
                             '--transfer-characteristics', 1,
@@ -220,19 +274,18 @@
                         )
                     }
 
-                    TalesFromTheLoop = @{
-                        DisplayName = "SVT-AV1 Tales.From.The.Loop"
+                    Silo = @{
+                        DisplayName = "SVT-AV1 [Tales.From.The.Loop,Silo.s03]"
                         CodecCode   = 'av1'
                         Quality     = 30
                         Preset      = 3
                         BaseArgs    = @(
                             '--rc', '0',
-                            '--lp', 5,
                             '--progress', 2,
                             '--enable-qm' , 1,
                             '--tune', 5,
-                            "--film-grain-denoise", 0,
-                            "--film-grain", 12,
+                            # "--film-grain-denoise", 0,
+                            # "--film-grain", 8,
                             '--color-range', '0',
                             '--color-primaries', '1',
                             '--transfer-characteristics', '1',
@@ -282,7 +335,7 @@
                     grain            = @{
                         DisplayName = "SVT-AV1 Grain"
                         CodecCode   = 'av1'
-                        Quality     = 36
+                        Quality     = 35
                         Preset      = 3
                         BaseArgs    = @(
                             '--rc', '0',

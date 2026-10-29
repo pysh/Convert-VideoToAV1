@@ -164,8 +164,8 @@ function Build-MetricFilterGraph {
             "eof_action=endall",
             "n_threads=$ThreadCount",
             "n_subsample=$Subsample",
-            "model=version=${ModelVersion}neg",
-            "pool=harmonic_mean"
+            "model=version=${ModelVersion}",
+            "pool=mean"
         )
         $metricFilters.Add("[dst${idx}][src${idx}]libvmaf=$($paramsNeg -join ':')")
         $idx++
@@ -427,11 +427,15 @@ function Get-VideoQualityMetrics3 {
     # ---------- GPU args и threads ----------
     $gpuArgs = @()
     if ($UseGPU) {
+        # $gpuArgs = @(
+        #     '-init_hw_device', 'cuda=cu:0',
+        #     '-init_hw_device', 'vulkan=vk@cu',
+        #     '-hwaccel', 'cuda',
+        #     '-hwaccel_output_format', 'cuda'
+        # )
         $gpuArgs = @(
-            '-init_hw_device', 'cuda=cu:0',
-            '-init_hw_device', 'vulkan=vk@cu',
-            '-hwaccel', 'cuda',
-            '-hwaccel_output_format', 'cuda'
+            '-init_hw_device', 'vulkan=vk:0',
+            '-filter_hw_device', 'vk'
         )
         $threadsToUse = [Math]::Min(4, $Threads)
     } else {
@@ -532,9 +536,9 @@ function Get-VideoQualityMetrics3 {
                 )
 
                 $timer = [System.Diagnostics.Stopwatch]::StartNew()
-                Write-Verbose "  ffmpeg $($ffargs | Out-String)"
+                Write-Debug "  ffmpeg $($ffargs -join ' ')"
                 $output = & $job.FFmpegPath $ffargs 2>&1
-                Write-Verbose ($output | Out-String)
+                Write-Debug ($output -join ' ')
                 $timer.Stop()
                 $result.Time = $timer
 
@@ -588,7 +592,7 @@ function Get-VideoQualityMetrics3 {
                 if ($job.SSIMCropArgs) { $ssimArgs += $job.SSIMCropArgs }
                 if ($job.SSIMCacheIndex) { $ssimArgs += "--cache-index" }
 
-                Write-Verbose "SSIMULACRA2 $($ssimArgs | Out-String)"
+                Write-Verbose "SSIMULACRA2 $($ssimArgs -join ' ')"
                 $output = & $job.FFVshipPath $ssimArgs 2>&1
                 Write-Verbose ($output | Where-Object {$_ -NotMatch ".*\[\|*\s*\].*"} | Out-String)
                 if ($LASTEXITCODE -eq 0) {

@@ -136,8 +136,11 @@ function Extract-AudioStreams {
     foreach ($stream in $audioStreams) {
         $index++
         
-        $language = $stream.tags.language ?? $stream.tags.LANGUAGE ?? 'und'
-        $title = $stream.tags.title ?? $stream.tags.TITLE ?? $stream.tags.handler_name ?? ''
+        # $language = $stream.tags.language ?? $stream.tags.LANGUAGE ?? 'und'
+        $language = if ($stream.tags.language -match '\w+') { $stream.tags.language } else { 'und' }
+
+        #$title = $stream.tags.title ?? $stream.tags.TITLE ?? $stream.tags.handler_name ?? ''
+        $title = if ($stream.tags.title -and ($stream.tags.title -ne 'SoundHandler')) {$stream.tags.TITLE ?? $stream.tags.handler_name ?? ''} else {''}
         
         $extension = switch ($stream.codec_name) {
             'aac' { 'm4a' }

@@ -22,6 +22,12 @@ param(
     
     [Parameter(Mandatory = $false)]
     [string]$InputFilter,
+
+    [Parameter(Mandatory = $false)]
+    [string]$FilePrefix = '',
+
+    [Parameter(Mandatory = $false)]
+    [string]$FileSuffix = '',
     
     [Parameter(Mandatory = $false)]
     [double]$TrimStartSeconds = 0,
@@ -264,13 +270,22 @@ process {
                     $width = $videoInfo.ResolutionWidth
                     $height = $videoInfo.ResolutionHeight
 
+                    # # Определение метки разрешения (порядок важен: от большего к меньшему)
+                    # $resolution = if ($width -ge 7680) { '8k' }
+                    # elseif ($width -ge 3840) { '4k' }
+                    # elseif ($width -ge 2560) { '2k' }
+                    # elseif ($width -ge 1920) { '1080p' }
+                    # elseif ($width -ge 1280) { '720p' }
+                    # else { "${height}p" }
+
                     # Определение метки разрешения (порядок важен: от большего к меньшему)
-                    $resolution = if ($width -ge 7680) { '8k' }
-                    elseif ($width -ge 3840) { '4k' }
-                    elseif ($width -ge 2560) { '2k' }
-                    elseif ($width -ge 1920) { '1080p' }
-                    elseif ($width -ge 1280) { '720p' }
-                    else { "${height}p" }
+                    $resolution = switch ($width) {
+                        { $_ -gt 3840 } { "8k"; break }
+                        { $_ -gt 2560 } { "4k"; break }
+                        { $_ -gt 1920 } { "2k"; break }
+                        { $_ -gt 1280 } { "1080p"; break }
+                        default { "${height}p" }
+                    }
 
                     # Общие для обеих веток значения
                     $title = & $sanitize $job.NfoFields.TITLE
@@ -281,18 +296,16 @@ process {
                         $season = [int]($job.NfoFields.SEASON_NUMBER ?? 1)
                         $episode = [int]($job.NfoFields.PART_NUMBER ?? 1)
 
-                        $outputFileName = ('{0} - s{1:00}e{2:00} - {3} [{4}][{5}][{6}].mkv' -f
-                            $showTitle, $season, $episode, $title, $airDate, $resolution, $encoderCode)
+                        $outputFileName = ('{7}{0} - s{1:00}e{2:00} - {3} [{4}][{5}][{6}]{8}.mkv' -f
+                            $showTitle, $season, $episode, $title, $airDate, $resolution, $encoderCode, $FilePrefix, $FileSuffix)
                     }
                     else {
-                        $original_title = & $sanitize $job.NfoFields.ORIGINAL_TITLE
-
-                        $outputFileName = ('{0} ({1}) [{2}][{3}][{4}].mkv' -f
-                            $title, $original_title, $airDate, $resolution, $encoderCode)
+                        $originalTitle = & $sanitize $job.NfoFields.ORIGINAL_TITLE
+                        $outputFileName = "${FilePrefix}${title} (${originalTitle}) [${airDate}][${resolution}][${encoderCode}]${FileSuffix}.mkv"
                     }
                 }
                 else {
-                    $outputFileName = "$($job.BaseName)_[$encoderCode].mkv"
+                    $outputFileName = "${$FilePrefix}$($job.BaseName)_[$encoderCode]${FileSuffix}.mkv"
                 }
 
                 $job.FinalOutput = Join-Path $OutputDirectory $outputFileName
@@ -303,8 +316,11 @@ process {
                 }
                 
                 $job = Invoke-Mux -Job $job
-                
-                $job | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ("$($job.FinalOutput).json") -Force
+                # Сохраняем сортированный json для удобного сравнения файлов
+                $jobJson = $job | ConvertTo-Json -Depth 100
+                $jobJson | Set-Content -LiteralPath ("$($job.FinalOutput).json") -Encoding utf8 -Force
+                $jobJsonSorted = $jobJson | . jq.exe '--sort-keys' '--monochrome-output' .
+                $jobJsonSorted | Set-Content -LiteralPath ("$($job.FinalOutput)[sorted].json") -Encoding utf8 -Force
 
                 # Итоговая статистика
                 $duration = [DateTime]::Now - $job.StartTime

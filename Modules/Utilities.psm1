@@ -1892,6 +1892,7 @@ function Get-VideoQualityMetrics2 {
                 "-f", "null", "-"
             )
             $result.VMAFffargs = $ffargs
+            Write-Host "ffmpeg.exe $($ffargs -join ' ')" -ForegroundColor Gray
             $VMAFTimer = [System.Diagnostics.Stopwatch]::StartNew()
             $output = & $ffmpeg $ffargs 2>&1
             $VMAFTimer.Stop()

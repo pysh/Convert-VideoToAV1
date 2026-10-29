@@ -98,6 +98,7 @@ function Get-FFprobeInfo {
         'stream_side_data=side_data_type,dv_profile,dv_bl_signal_compatibility_id,bl_present_flag,dv_level,rpu_present_flag,el_present_flag'
         'stream_tags=NUMBER_OF_FRAMES,DURATION'
     ) -join ':'
+    #$showEntries = @('stream', 'format') -join ':'
 
     $ffprobeArgs = [System.Collections.Generic.List[string]]::new()
     $ffprobeArgs.AddRange([string[]]@('-v', 'error'))
@@ -110,8 +111,10 @@ function Get-FFprobeInfo {
     }
 
     $ffprobeArgs.AddRange([string[]]@(
+            '-v', 'error',
             '-select_streams', 'v:0',
-            '-show_entries', $showEntries,
+            #'-show_entries', $showEntries,
+            '-show_streams', '-count_packets', '-show_format', '-show_packets'
             '-of', 'json',
             $ScriptPath
         ))
@@ -125,7 +128,7 @@ function Get-FFprobeInfo {
     }
 
     try {
-        $infoJson = $ffprobeOutput | ConvertFrom-Json -Depth 10
+        $infoJson = $ffprobeOutput | ConvertFrom-Json -Depth 50
     }
     catch {
         throw "Не удалось распарсить JSON от ffprobe: $_"
@@ -195,6 +198,22 @@ function Get-FFprobeInfo {
         $duration = $frameCount / $fpsValue
     }
 
+
+
+    # Calculate duration and bitrate from packets
+    $durationFromPackets = $videoBitrate = $videoDataSize = 0
+    if ($infoJson.packets -and $infoJson.packets.Count -gt 0) {
+        $firstPacketTime = [double]$infoJson.packets[0].pts_time
+        $lastPacketTime = [double]($infoJson.packets | Measure-Object -Property pts_time -Maximum).Maximum
+        $durationFromPackets = $lastPacketTime - $firstPacketTime
+        $videoDataSize = ($infoJson.packets | Measure-Object -Property size -Sum).Sum
+        
+        if ($durationFromPackets -gt 0) {
+            $videoBitrate = [math]::Round(($videoDataSize * 8) / $durationFromPackets / 1Kb, 2)
+        }
+    }
+
+
     # --- Dolby Vision ---
     $isDolbyVision = $false
     $dvProfile = $null
@@ -225,6 +244,10 @@ function Get-FFprobeInfo {
 
     [PSCustomObject]@{
         Index            = [int]$stream.index
+        FilePath         = $ScriptPath
+        FileName         = [IO.Path]::GetFileName($ScriptPath)
+        FileSizeBytes    = (Get-Item -LiteralPath $ScriptPath).Length
+        VideoDataSizeBytes = $videoDataSize
         Frames           = $frameCount
         FramesSource     = $frameCountSource
         FPS              = [math]::Round($fpsValue, 3)
@@ -232,7 +255,7 @@ function Get-FFprobeInfo {
         FPSden           = $fpsDen
         Width            = [int]$stream.width
         Height           = [int]$stream.height
-        Codec            = $stream.codec_name
+        VideoCodec       = $stream.codec_name
         Duration         = [math]::Round($duration, 3)
         DurationTimeSpan = [TimeSpan]::FromSeconds($duration)
         color_primaries  = $stream.color_primaries
